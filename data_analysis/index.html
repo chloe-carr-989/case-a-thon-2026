@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AIS Vessel Timeline</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; font-family: Arial, sans-serif; }
+#app { height: 100dvh; display: flex; flex-direction: column; }
+header { padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 1px solid #ddd; }
+h1 { margin: 0; font-size: 18px; }
+#map { flex: 1; min-height: 0; background: #e8eef2; }
+#controls { padding: 14px 18px; border-top: 1px solid #ddd; background: white; }
+#info { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; font-size: 14px; }
+#currentTime { font-weight: bold; }
+#timelineRow { display: flex; gap: 12px; align-items: center; }
+#timeline { flex: 1; min-width: 0; }
+button { padding: 8px 14px; background: white; border: 1px solid #aaa; border-radius: 5px; cursor: pointer; }
+button:disabled { opacity: .5; }
+#labels { display: flex; justify-content: space-between; margin: 7px 0 0 68px; font-size: 12px; color: #666; }
+#status { margin-top: 8px; font-size: 12px; color: #666; overflow-wrap: anywhere; }
+#loadProgress { display: none; width: 100%; height: 8px; margin-top: 10px; accent-color: #2475c1; }
+@media (max-width: 650px) {
+    header { flex-direction: column; align-items: flex-start; }
+    #info { flex-direction: column; gap: 5px; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+    <h1>AIS Vessel Timeline</h1>
+    <input id="fileInput" type="file" accept=".csv,text/csv">
+</header>
+<div id="map"></div>
+<div id="controls">
+    <div id="info">
+        <span id="currentTime">Load an AIS CSV</span>
+        <span id="stats"></span>
+    </div>
+    <div id="timelineRow">
+        <button id="playButton" disabled>Play</button>
+        <input id="timeline" type="range" min="0" max="144" value="0" disabled>
+    </div>
+    <div id="labels">
+        <span id="startLabel"></span>
+        <span id="endLabel"></span>
+    </div>
+    <progress id="loadProgress" max="100" value="0" aria-label="CSV loading progress"></progress>
+    <div id="status">Select a CSV file.</div>
+</div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script>
+const REGION = {
+    minLat: 36.5,
+    maxLat: 38.5,
+    minLon: -77.5,
+    maxLon: -75.0
+};
+
+function isInRegion(lat, lon) {
+    return true
+    // return lat >= REGION.minLat && lat <= REGION.maxLat &&
+    //        lon >= REGION.minLon && lon <= REGION.maxLon;
+}
+
+const HALF_DAY = 12 * 60 * 60 * 1000;
+const STEP = 5 * 60 * 1000;
+const MAX_AGE = 30 * 60 * 1000;
+const PLAY_DURATION = 5000;
+
+const fileInput = document.getElementById("fileInput");
+const slider = document.getElementById("timeline");
+const playButton = document.getElementById("playButton");
+const status = document.getElementById("status");
+const loadProgress = document.getElementById("loadProgress");
+const stats = document.getElementById("stats");
+const currentTime = document.getElementById("currentTime");
+
+const map = L.map("map", { preferCanvas: true }).fitBounds([
+    [REGION.minLat, REGION.minLon],
+    [REGION.maxLat, REGION.maxLon]
+]);
+
+L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+    { attribution: "Tiles &copy; Esri and its data providers", maxZoom: 18 }
+).addTo(map);
+
+const canvasRenderer = L.canvas({ padding: 0.5 });
+const routeLayer = L.layerGroup().addTo(map);
+const vesselLayer = L.layerGroup().addTo(map);
+let vesselData = new Map();
+let markers = new Map();
+let startTime = 0;
+let endTime = 0;
+let timer = null;
+let totalValid = 0;
+
+fileInput.addEventListener("change", event => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    stopPlayback();
+    vesselData.clear();
+    vesselLayer.clearLayers();
+    routeLayer.clearLayers();
+    markers.clear();
+    totalValid = 0;
+    slider.disabled = true;
+    playButton.disabled = true;
+    fileInput.disabled = true;
+    loadProgress.style.display = "block";
+    loadProgress.value = 0;
+    status.textContent = "Reading " + file.name + "... 0%";
+
+    let columns = null;
+    let missing = null;
+    let totalRows = 0;
+    let invalidTime = 0;
+    let invalidPosition = 0;
+    let outsideRegion = 0;
+    let earliest = Infinity;
+    let latest = -Infinity;
+    let parseWarnings = 0;
+    let failed = false;
+
+    function finishLoading() {
+        fileInput.disabled = false;
+        loadProgress.style.display = "none";
+    }
+
+    Papa.parse(file, {
+        header: true,
+        skipEmptyLines: "greedy",
+        worker: false,
+        dynamicTyping: false,
+        chunkSize: 1024 * 1024,
+        transformHeader: header => header.replace(/^\uFEFF/, "").trim(),
+
+        chunk: (result, parser) => {
+            if (failed) return;
+
+            parseWarnings += result.errors.length;
+
+            if (columns === null) {
+                const fields = result.meta.fields || [];
+                const lookup = {};
+                for (const field of fields) {
+                    lookup[field.toLowerCase().replace(/[^a-z0-9]/g, "")] = field;
+                }
+
+                function fieldName(...aliases) {
+                    for (const alias of aliases) {
+                        if (lookup[alias]) return lookup[alias];
+                    }
+                    return null;
+                }
+
+                columns = {
+                    mmsi: fieldName("mmsi"),
+                    time: fieldName("basedatetime", "timestamp", "datetime", "time", "date"),
+                    lat: fieldName("latitude", "lat"),
+                    lon: fieldName("longitude", "lon", "long"),
+                    name: fieldName("vesselname", "name"),
+                    speed: fieldName("sog", "speed"),
+                    course: fieldName("cog", "course"),
+                    heading: fieldName("heading"),
+                    type: fieldName("vesseltype", "shiptype"),
+                    transceiver: fieldName("transceiver")
+                };
+
+                missing = ["mmsi", "time", "lat", "lon"].filter(key => !columns[key]);
+                if (missing.length) {
+                    failed = true;
+                    parser.abort();
+                    status.textContent = "Missing columns: " + missing.join(", ") +
+                        ". Detected headers: " + fields.join(", ");
+                    console.error("CSV headers:", fields);
+                    finishLoading();
+                    return;
+                }
+            }
+
+            for (const row of result.data) {
+                totalRows++;
+                const mmsi = String(row[columns.mmsi] ?? "").trim();
+                if (!mmsi) continue;
+
+                const time = parseTime(row[columns.time]);
+                if (!Number.isFinite(time)) {
+                    invalidTime++;
+                    continue;
+                }
+
+                const latText = String(row[columns.lat] ?? "").trim();
+                const lonText = String(row[columns.lon] ?? "").trim();
+                if (!latText || !lonText) {
+                    invalidPosition++;
+                    continue;
+                }
+
+                const lat = Number(latText);
+                const lon = Number(lonText);
+                if (!Number.isFinite(lat) || !Number.isFinite(lon) ||
+                    lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+                    invalidPosition++;
+                    continue;
+                }
+
+                if (!isInRegion(lat, lon)) {
+                    outsideRegion++;
+                    continue;
+                }
+
+                const record = {
+                    mmsi, time, lat, lon,
+                    name: columns.name ? row[columns.name] : "",
+                    speed: columns.speed ? row[columns.speed] : "",
+                    course: columns.course ? row[columns.course] : "",
+                    heading: columns.heading ? row[columns.heading] : "",
+                    type: columns.type ? row[columns.type] : "",
+                    transceiver: columns.transceiver ? row[columns.transceiver] : ""
+                };
+
+                if (!vesselData.has(mmsi)) vesselData.set(mmsi, []);
+                vesselData.get(mmsi).push(record);
+                earliest = Math.min(earliest, time);
+                latest = Math.max(latest, time);
+                totalValid++;
+            }
+
+            // PapaParse reports its cursor as text offset, which approximates
+            // byte progress for typical ASCII AIS CSV files.
+            const percent = Math.min(99, Math.floor(result.meta.cursor / file.size * 100));
+            loadProgress.value = percent;
+            status.textContent = `Reading ${file.name}... ${percent}% ` +
+                `(${totalRows.toLocaleString()} rows processed)`;
+        },
+
+        complete: () => {
+            if (failed) return;
+
+            if (!totalValid) {
+                status.textContent = `No positions in selected region. ${totalRows} rows read, ` +
+                    `${outsideRegion} outside region, ${invalidTime} invalid timestamps, ` +
+                    `${invalidPosition} invalid coordinates.`;
+                finishLoading();
+                return;
+            }
+
+            loadProgress.value = 99;
+            status.textContent = "Preparing vessel routes...";
+
+            // Give the browser a chance to paint the progress bar before
+            // sorting records and constructing route geometry.
+            setTimeout(() => {
+                try {
+                    for (const records of vesselData.values()) {
+                        records.sort((a, b) => a.time - b.time);
+                    }
+
+                    startTime = earliest;
+                    endTime = Math.min(earliest + HALF_DAY, latest);
+                    slider.min = 0;
+                    slider.max = Math.max(1, Math.ceil((endTime - startTime) / STEP));
+                    slider.value = 0;
+                    slider.disabled = false;
+                    playButton.disabled = false;
+
+                    document.getElementById("startLabel").textContent = formatTime(startTime);
+                    document.getElementById("endLabel").textContent = formatTime(endTime);
+
+                    initializeMarkers();
+                    drawRoutes();
+                    render(startTime);
+
+                    loadProgress.value = 100;
+                    status.textContent = `${totalValid.toLocaleString()} regional records, ` +
+                        `${vesselData.size.toLocaleString()} vessels, ${outsideRegion.toLocaleString()} ` +
+                        `outside region, ${invalidTime} invalid timestamps, ` +
+                        `${invalidPosition} invalid positions, ${parseWarnings} CSV warnings.`;
+                } catch (error) {
+                    status.textContent = "Could not prepare routes: " + error.message;
+                    console.error(error);
+                } finally {
+                    finishLoading();
+                }
+            }, 0);
+        },
+
+        error: error => {
+            failed = true;
+            status.textContent = "CSV error: " + error.message;
+            console.error(error);
+            finishLoading();
+        }
+    });
+});
+
+function parseTime(value) {
+    if (value === null || value === undefined) return NaN;
+    const text = String(value).trim();
+    if (!text) return NaN;
+    let normalized = text.replace(" ", "T");
+    if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(normalized)) normalized += "Z";
+    return Date.parse(normalized);
+}
+
+function initializeMarkers() {
+    for (const [mmsi, records] of vesselData) {
+        const initial = records[0];
+        markers.set(mmsi, L.circleMarker([initial.lat, initial.lon], {
+            renderer: canvasRenderer,
+            radius: 5,
+            color: "#154b87",
+            fillColor: "#2475c1",
+            fillOpacity: 0.85,
+            weight: 1
+        }));
+    }
+}
+
+function drawRoutes() {
+    routeLayer.clearLayers();
+
+    for (const records of vesselData.values()) {
+        const points = records
+            .filter(record => record.time >= startTime && record.time <= endTime)
+            .map(record => [record.lat, record.lon]);
+
+        if (points.length < 2) continue;
+
+        L.polyline(points, {
+            renderer: canvasRenderer,
+            color: "#2d6898",
+            weight: 1,
+            opacity: 0.5,
+            interactive: false
+        }).addTo(routeLayer);
+    }
+}
+
+function latestRecordIndex(records, time) {
+    let low = 0;
+    let high = records.length - 1;
+    let found = -1;
+
+    while (low <= high) {
+        const mid = Math.floor((low + high) / 2);
+        if (records[mid].time <= time) {
+            found = mid;
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+    return found;
+}
+
+function render(time) {
+    let visible = 0;
+    let stale = 0;
+
+    for (const [mmsi, records] of vesselData) {
+        const marker = markers.get(mmsi);
+        const index = latestRecordIndex(records, time);
+
+        if (index < 0) {
+            vesselLayer.removeLayer(marker);
+            continue;
+        }
+
+        const record = records[index];
+        const next = records[index + 1];
+        const age = time - record.time;
+
+        // Move between successive recorded AIS positions during retrospective playback.
+        // Do not interpolate beyond the 30-minute report-age limit.
+        let lat = record.lat;
+        let lon = record.lon;
+        let moving = false;
+
+        if (next && next.time > record.time &&
+            next.time <= endTime &&
+            next.time - record.time <= MAX_AGE) {
+            const fraction = (time - record.time) / (next.time - record.time);
+            lat = record.lat + (next.lat - record.lat) * fraction;
+            lon = record.lon + (next.lon - record.lon) * fraction;
+            moving = true;
+        }
+
+        if (!moving && age > MAX_AGE) {
+            stale++;
+            vesselLayer.removeLayer(marker);
+            continue;
+        }
+
+        marker.setLatLng([lat, lon]);
+        const speed = Number(record.speed);
+        marker.setRadius(record.speed !== "" && Number.isFinite(speed)
+            ? Math.min(9, 4 + speed / 8) : 5);
+
+        marker.bindPopup(`
+            <strong>${escapeHtml(record.name || "Unknown vessel")}</strong>
+            <div>MMSI: ${escapeHtml(record.mmsi)}</div>
+            <div>Last report: ${formatTime(record.time)}</div>
+            <div>Report age: ${Math.floor(age / 60000)} min</div>
+            <div>Speed: ${escapeHtml(record.speed || "N/A")} knots</div>
+            <div>Course: ${escapeHtml(record.course || "N/A")}</div>
+            <div>Heading: ${escapeHtml(record.heading || "N/A")}</div>
+            <div>Type: ${escapeHtml(record.type || "N/A")}</div>
+            <div>Transceiver: ${escapeHtml(record.transceiver || "N/A")}</div>
+        `);
+
+        if (!vesselLayer.hasLayer(marker)) marker.addTo(vesselLayer);
+        visible++;
+    }
+
+    currentTime.textContent = formatTime(time);
+    stats.textContent = `${visible.toLocaleString()} visible vessels | ${stale.toLocaleString()} stale`;
+}
+
+function sliderTime() {
+    return Math.min(startTime + Number(slider.value) * STEP, endTime);
+}
+
+slider.addEventListener("input", () => {
+    stopPlayback();
+    render(sliderTime());
+});
+
+playButton.addEventListener("click", () => {
+    if (timer !== null) {
+        stopPlayback();
+        return;
+    }
+
+    if (Number(slider.value) >= Number(slider.max)) {
+        slider.value = 0;
+        render(startTime);
+    }
+
+    const initialTime = sliderTime();
+    const remainingFraction = (endTime - initialTime) / (endTime - startTime || 1);
+    const duration = PLAY_DURATION * remainingFraction;
+    const startedAt = performance.now();
+
+    playButton.textContent = "Pause";
+
+    function frame(now) {
+        const fraction = Math.min((now - startedAt) / Math.max(duration, 1), 1);
+        const time = initialTime + fraction * (endTime - initialTime);
+        slider.value = Math.min(Number(slider.max),
+            Math.round((time - startTime) / STEP));
+        render(time);
+
+        if (fraction >= 1) {
+            timer = null;
+            playButton.textContent = "Play";
+        } else {
+            timer = requestAnimationFrame(frame);
+        }
+    }
+
+    timer = requestAnimationFrame(frame);
+});
+
+function stopPlayback() {
+    if (timer !== null) {
+        cancelAnimationFrame(timer);
+        timer = null;
+    }
+    playButton.textContent = "Play";
+}
+
+function formatTime(time) {
+    return new Date(time).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+</script>
+</body>
+</html>
