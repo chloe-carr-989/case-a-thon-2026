@@ -11,7 +11,16 @@ useful performance without just refusing to answer?
   Inputs: latest AIS report plus the previous fix. The model is **trained once on nominal data and frozen.**
   Constant-velocity dead reckoning is reported as a non-ML benchmark.
 * **Failure stage:** inference-time AIS feed degradation (stale, low quality, and both together).
-* **Data:** MarineCadastre AIS broadcast points for 2026-01-01 (`../data/dataset3/` at the repository root, not redistributed).
+* **Four questions** (one app page each, plus a shared data-integrity page; see `docs/CASE_DEMO.md`):
+  1. *Where is this vessel going?* Next **inferred arrival zone** within 6 h, from a trained candidate-zone ranker.
+  2. *Where will this vessel be in 15 minutes?* The original task, unchanged; its results are bit-identical.
+  3. *How congested will this port be?* An AIS **occupancy proxy** (vessels dwelling in a study zone in the next
+     hour), not congestion or waiting time.
+  4. *How busy will this area be?* Unique vessels per 0.25° cell in the next hour.
+* **Shared checks:** record-level integrity flags and observation/reporting-gap detection
+  (`src/aisdp/quality.py`), tested on real records and on synthetic withheld or delayed runs.
+* **Data:** MarineCadastre AIS broadcast points for 2026-01-01 and 2026-01-02 (`../data/dataset3/marine_2026-01/`; subsets in
+  `../data/dataset3/marine_subsets/`; not redistributed). The website default is the two-day run `jan01_02`.
   Everything for this project lives in `website/`; run all commands from that folder.
 
 ## Quick start (Windows PowerShell)
@@ -22,8 +31,11 @@ cd website
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 
-# 1) pipeline: subsets 4 -> 3 -> 2 -> 1, then the full day (~47 s total measured here)
+# 1) pipeline: all tasks on subsets 4 -> 3 -> 2 -> 1, then the full day (about 4 min measured, warm Parquet cache)
 .venv\Scripts\python scripts\run_pipeline.py --subsets subset4,subset3,subset2,subset1,full
+#    only some tasks:  --tasks quality,position_15m,traffic_density,destination,port_occupancy
+#    website default (train on Jan 1, test on Jan 2; ~5 min):
+.venv\Scripts\python scriptsun_pipeline.py --subsets jan01_02 --train-frac 0.5 --budget-s 3000
 
 # 2) dashboard (opens http://localhost:8501)
 .venv\Scripts\streamlit run app\dashboard.py
@@ -33,7 +45,7 @@ The repository already contains computed `results/`, so step 2 works without ste
 past-hour track of the selected vessel on the map, which reads the git-ignored `cache/parquet`. Tests:
 `.venv\Scripts\python -m pytest -q tests`.
 
-CLI options: `--subsets`, `--input <csv|csv.zst>` with `--subsets custom`, `--region all|us_east|gulf|us_west`,
+CLI options: `--tasks`, `--subsets`, `--input <csv|csv.zst>` with `--subsets custom`, `--region all|us_east|gulf|us_west`,
 `--start/--end 'YYYY-MM-DD HH:MM:SS'`, `--max-rows`, `--sample-vessels` (default 4000), `--seeds 0,1,2`,
 `--budget-s` (larger subsets are skipped after one exceeds it), `--output`.
 
@@ -50,10 +62,52 @@ they are nested and never combined.
 | subset1 | 433 MB | 4,229,555 | 15,605 | 00:00–13:46 | completed, 29,776 test cases | 13.5 |
 | full day | 869 MB | 8,497,825 | 17,123 | 00:00–23:59 | completed, 57,160 test cases (**default demo**) | 27.4 |
 
+With all tasks (latest rows of `results/benchmarks.csv`, warm ingest cache): subset2 7.1 s. There, integrity and
+position are completed, but counts and destination are `insufficient_data`: the 3-h lookback plus 1-h target does
+not fit in 2 h, and there are only 31 / 5 labelled arrivals. Subset1 takes 69 s and the full day 172 s, with all
+tasks completed. Full-day task times: integrity 25 s, density 54 s, destination 54 s, port 11 s, position 27 s.
+Warm full-day runs measured 145–172 s on this machine. A cold start (full-day Parquet cache deleted first, with code
+before the final determinism fix) took 159.9 s, including a 4.7 s ingest.
+
 Timings are from `results/benchmarks.csv` on a 12-thread machine with 19 GB RAM. All runs include a cold Parquet ingest
 (full day: 4.7 s of the 27.4 s).
 
-## Results (default demo = full day, 3 seeds, 57,160 held-out cases from 1,060 test vessels)
+## Two-day results (website default: `jan01_02`, train on Jan 1, test on Jan 2)
+
+Jan 1 and Jan 2 ingested together: 16,158,949 reports, 19,231 vessels, 313 s for all tasks (warm cache for Jan 1).
+`--train-frac 0.5` puts the chronological split at Jan 2 00:00 UTC for every task, so all models are trained on Jan 1
+and tested on a day they never saw. Position: 217,560 train cases (capped at 200k rows), 93,015 test cases from 992
+test vessels. Means over seeds 0/1/2. Single-day numbers (next section) are kept in `results/runs/full/`.
+
+| metric (clean feed) | Jan 1 only | Jan 1 → Jan 2 |
+|---|---|---|
+| position mean / p90 km, all vessels | 0.182 / 0.385 | 0.169 / 0.361 |
+| position mean km, underway (constant velocity) | 0.916 (0.952) | 0.899 (0.941) |
+| density MAE (persistence) | 0.409 (0.458) | 0.325 (0.368) |
+| port proxy MAE (persistence) | 2.62 (**2.26**) | 2.19 (**2.08**) |
+| destination top-1 / top-3 (baseline top-1) | 0.502 / 0.773 (0.363) | 0.499 / 0.756 (0.326) |
+
+| position, all vessels | unmitigated mean km | quality-aware mean km (coverage) | policy cost |
+|---|---|---|---|
+| nominal | 0.169 | 0.170 (0.997) | 0.170 |
+| stale | 0.454 | 0.208 (0.771) | 0.243 |
+| low quality | 3.926 | 0.383 (0.967) | 0.383 |
+| combined | 4.249 | 0.418 (0.735) | 0.403 |
+| holdout unseen bias | 1.135 | 0.312 (0.935) | 0.315 |
+
+What changed with the second day:
+
+* Clean-feed errors are slightly lower on Jan 2 for position, density and port, but the comparisons with the baselines
+  look the same as before. The port-proxy model still does **not** beat persistence.
+* Destination top-1 accuracy holds (0.50). Top-3 drops a little (0.77 → 0.76). The model's lead over the heading
+  baseline grows (+0.14 → +0.17).
+* The countermeasure results look like the single-day run (combined policy cost 4.25 → 0.40 km at 74% coverage).
+  For underway vessels the unseen-bias holdout is now clearly **worse** with the countermeasure: mean
+  1.277 → 1.536 km, p90 2.56 → 3.61 km. On Jan 1 it was 1.295 → 1.305 km.
+* The model is still trained once and frozen. Note that "more data" here means more training *time span*. The
+  vessel sample (4,000) and the row cap (200k) are unchanged, so the position model saw 200k rows, up from 110k.
+
+## Single-day results (Jan 1 only, 3 seeds, 57,160 held-out cases from 1,060 test vessels)
 
 Errors are haversine km between the predicted position and the later AIS report, measured **on answered cases**.
 Coverage is the share of cases answered. *Policy cost* charges each deferral 0.385 km (the nominal unmitigated p90), so
@@ -93,6 +147,38 @@ combined 6.84 km unmitigated, 1.66 km mitigated at 76% coverage; **holdout bias 
 
 Model compute latency is about 0.005 ms per case in batch for both pipelines. Human review time is measured separately in the UI log and is demo-only.
 
+## Expansion tasks (full day, 3 seeds; definitions in `results/manifest.json` → `tasks`)
+
+| task | trained model | comparator(s) | clean-feed result | evaluated on |
+|---|---|---|---|---|
+| destination | HGB candidate-zone ranker | heading-aligned nearest zone | top-1 0.502 / top-3 0.773 vs 0.363 / 0.633 | 3,594 decisions, 647 unseen vessels, 324 zones |
+| traffic density | HGB on change from persistence | persistence, 3-h mean, train mean | MAE 0.409 vs 0.458 / 0.582 / 0.865 vessels | 3,225 cells × 45 hourly-ahead origins |
+| port occupancy proxy | same as density | same | MAE 2.62 vs **2.26 (persistence wins)** / 2.78 / 4.95 | 60 study zones × 45 origins |
+
+Matched stress tests (the same four conditions × countermeasure off/on, identical cases and references):
+
+| metric | clean off / on | stale off / on | low quality off / on | combined off / on |
+|---|---|---|---|---|
+| density MAE | 0.409 / 0.425 | 0.931 / 0.453 (85% answered) | 4.279 / 0.457 | 3.538 / 0.496 (85%) |
+| port proxy MAE | 2.62 / 2.93 | 12.13 / 2.86 (85%) | 63.4 / 3.62 | 51.4 / 3.27 (85%) |
+| destination top-1 on answered (over all cases) | 0.502 / 0.502 | 0.476 / 0.488 (0.474 / **0.389**) | 0.487 / 0.494 | 0.464 / 0.480 (0.461 / **0.382**) |
+
+Read the honest parts too:
+
+* The port-proxy model does **not** beat persistence.
+* The count countermeasure slightly hurts clean-feed accuracy, because it drops real one-report vessels.
+* Persistent synthetic ghost IDs pass the filters.
+* For destination, reusing the 15-minute age gate lowers accuracy over all cases. It defers stale but still useful
+  inputs (306 of 733 deferred stale cases had been answered correctly).
+
+**Data integrity (full day, observed):**
+
+* 7,375 of 8,497,825 records are flagged: 4,007 non-vessel MIDs, 2,456 implausible jumps, 1,059 exact duplicates
+  and 43 implausible SOG.
+* 31,216 reporting gaps from 7,445 vessels (median 21.7 min). Of these, 1,983 are possible coverage exits.
+* On synthetic withheld/delayed runs, real-time recall is 96–97% with no false alarms on shorter events.
+  At decision time a delay is indistinguishable from a loss; it is only relabelled once the late records arrive.
+
 ## Architecture
 
 ```
@@ -104,9 +190,17 @@ features.py   sentinel cleaning (observed defects) -> deterministic vessel sampl
 model.py      residual HGB on mean velocity; constant-velocity benchmark
 corruption.py seeded stale delays / SYN-FASTFEED defects / unseen bias (labelled per case)
 mitigation.py age gate + compensation, validity + track-consistency checks, imputation, fallback, quality score, deferral
+              (+ sanitize_state: the same checks for the destination task)
+quality.py    record flag codes (DuckDB window pass), reporting gaps + coverage-exit heuristic, synthetic gap test
+zones.py      10-min vessel buckets -> dwell events -> train-period inferred arrival / port study zones
+counts.py     (unit, 15-min bucket, mmsi) presence -> sort-once interval sweep for unique counts per window,
+              residual HGB, SYN-FASTFEED ghosts/duplicates/omissions, late-feed detection, transient filter
+destination.py arrival labels with cutoffs, candidate-zone features, HGB ranker, baseline, abstention, metrics
+tasks.py      per-task runners writing results/runs/<subset>/*;  contracts.py  thin PredictionResult adapters
 experiment.py 5 conditions x 2 treatments x 5 windows x 3 seeds on identical cases -> metrics
 scripts/run_pipeline.py   CLI, subset benchmark, results/*, manifest
-app/dashboard.py          Streamlit + Plotly (offline Scattergeo, no tile server or API keys)
+app/dashboard.py          Streamlit router (st.navigation) -> q_position.py (original page), q_destination.py,
+                          q_port.py / q_density.py (shared count_page.py), q_integrity.py; common.py helpers
 ```
 
 **Scale strategy.** DuckDB streams CSV into hour-partitioned Parquet (24 files per day, so no tiny-file explosion).
@@ -118,6 +212,13 @@ The design targets them, but no throughput claim is made beyond what is measured
 
 ## Limitations
 
+* **New tasks:**
+  * Zones are inferred grid cells, not ports. Destination accuracy is conditional on an observed stop in a known zone.
+  * The port count is an occupancy proxy, so there are no delay claims.
+  * Count origins overlap (60-min windows every 15 min) and the same cells are used for training and test.
+  * The new-task timings were measured with a warm Parquet ingest cache. The cold ingest timings are the earlier rows of
+    `results/benchmarks.csv`.
+
 * One day of data. The windows are real chronological periods, but the degradation progression is **simulated**.
 * The later AIS report is a noisy proxy for position: it is not ground truth, and it can itself be glitched.
 * Most vessels are moored, so all-vessel medians are a few meters. Read the *underway* subgroup for movement skill.
@@ -126,7 +227,7 @@ The design targets them, but no throughput claim is made beyond what is measured
 * Vessel-disjoint split by MMSI hash. Vessels sharing routes or ports can still make the test easier than truly new traffic.
 * Human-review effort is the measured wall time in a demo UI, not an operator study.
 
-See `docs/DEMO.md`, `docs/DECISION.md`, `docs/PLAN.md`, and `results/manifest.json`.
+See `docs/CASE_DEMO.md` (all four questions), `docs/DEMO.md`, `docs/DECISION.md`, `docs/PLAN.md`, and `results/manifest.json`.
 
 ## Troubleshooting
 

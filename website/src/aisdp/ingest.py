@@ -68,16 +68,20 @@ def region_sql(region: str) -> str:
     return f"longitude BETWEEN {x0} AND {x1} AND latitude BETWEEN {y0} AND {y1}"
 
 
-def csv_source(path: Path) -> str:
-    comp = "zstd" if str(path).endswith(".zst") else "auto"
+def csv_source(paths: list[Path]) -> str:
+    comp = "zstd" if str(paths[0]).endswith(".zst") else "auto"
     types = ", ".join(f"'{k}': '{v}'" for k, v in CSV_TYPES.items())
-    return f"read_csv('{path.as_posix()}', header=true, compression='{comp}', types={{{types}}})"
+    files = ", ".join(f"'{p.as_posix()}'" for p in paths)
+    return f"read_csv([{files}], header=true, compression='{comp}', types={{{types}}})"
 
 
-def ingest(con, src: Path, name: str, region: str = "all", start: str | None = None,
+def ingest(con, src: Path | list[Path], name: str, region: str = "all", start: str | None = None,
            end: str | None = None, max_rows: int | None = None) -> dict:
-    """Write Parquet partitions for one source file. Returns ingest info (cached)."""
-    fp = _fp_cache(src)
+    """Write Parquet partitions for one source file (or several daily files). Returns ingest info (cached)."""
+    paths = list(src) if isinstance(src, (list, tuple)) else [src]
+    fps = [_fp_cache(p) for p in paths]
+    fp = fps[0] if len(fps) == 1 else {"path": [f["path"] for f in fps], "bytes": sum(f["bytes"] for f in fps),
+                                       "hash": [f["hash"] for f in fps], "files": fps}
     key = hashlib.sha256(json.dumps([fp["hash"], region, start, end, max_rows, SCHEMA_VERSION]).encode()).hexdigest()[:12]
     out = CACHE_DIR / "parquet" / f"{name}_{region}_{key}"
     info_path = out / "_ingest.json"
@@ -98,7 +102,7 @@ def ingest(con, src: Path, name: str, region: str = "all", start: str | None = N
           SELECT mmsi, base_date_time AS ts, CAST(base_date_time AS DATE) AS day,
                  hour(base_date_time) AS hr, longitude AS lon, latitude AS lat,
                  sog, cog, heading, vessel_type, status, length, transceiver
-          FROM {csv_source(src)}
+          FROM {csv_source(paths)}
           WHERE {' AND '.join(where)}
           {limit}
         ) TO '{out.as_posix()}' (FORMAT parquet, PARTITION_BY (day, hr), OVERWRITE_OR_IGNORE true)

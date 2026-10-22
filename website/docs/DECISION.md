@@ -48,3 +48,23 @@ A frozen ML model can be *more* fragile than a physics baseline when its inputs 
 amplify single bad fixes. Gating on report age and track consistency recovers most accuracy, at a visible
 coverage cost. It does not cover every new defect, so human review and monitoring remain necessary.
 This is not a deployment authorization. NIST AI RMF was used only as an informal organizing reference.
+
+## Expansion tasks (destination, port occupancy proxy, traffic density)
+
+| role | added responsibility |
+|---|---|
+| Duty data-quality reviewer | Also works deferred count forecasts (`defer_late_feed`) and destination deferrals or "unknown" answers. Each is logged in `results/review_log.csv` with the `task` column and a correction field. |
+| Data-quality owner | Owns the integrity flag codes and the gap thresholds in `QualityConfig`. Reviews the observed flag counts (`results/quality_flags.csv`) and the reporting-gap rate per run. |
+| Model owner | Owns the three new models and their comparators: persistence, rolling mean and training mean for counts; heading-aligned nearest zone for destination. Owns the zone definitions, which are re-derived from training-period data only. |
+| Operations supervisor | Decides per task whether the trained model, the simple comparator, or nothing is shown. |
+
+**Task-level go/no-go:**
+
+* A task goes to pilot only if its trained model beats its simple comparator on the replay. On the current data
+  this holds for destination and traffic density. **It does not hold for the port occupancy proxy**: there, show
+  persistence or keep it shadow-only.
+* Never present the port proxy as congestion, berth occupancy or waiting time. Never present inferred zones as
+  named ports or verified arrivals.
+* No-go when the countermeasure lowers policy-level accuracy. Destination currently fails this under stale input,
+  because its age gate was copied from the 15-minute task. Redesign the gate for the 6-hour horizon first.
+* Reporting gaps are observation gaps. They are not escalated as transmitter failures or misconduct without other evidence.

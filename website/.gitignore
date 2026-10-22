@@ -5,3 +5,4 @@ __pycache__/
 .pytest_cache/
 results/review_log.csv
 results/runs/*/cases_seed0.parquet
+results/runs/*/*.parquet

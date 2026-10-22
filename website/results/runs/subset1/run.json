@@ -2,7 +2,7 @@
  "model_info": {
   "train_rows": 64816,
   "train_vessels": 2458,
-  "train_seconds": 2.37,
+  "train_seconds": 2.42,
   "features": [
    "sog",
    "cog_sin",
@@ -59,7 +59,7 @@
    "reliable": 157324
   }
  },
- "seconds": 9.96,
+ "seconds": 10.41,
  "subset": "subset1",
  "profile": {
   "rows": 4229555,
@@ -100,7 +100,7 @@
   "end": null,
   "max_rows": null,
   "ingest_seconds": 2.62,
-  "cache_hit": false
+  "cache_hit": true
  },
  "config": {
   "horizon_s": 900,
@@ -143,5 +143,390 @@
   "defer_quality": 0.35,
   "region": "all",
   "extra": {}
+ },
+ "tasks": {
+  "data_quality": {
+   "status": "completed",
+   "flags": {
+    "rows": 4229555,
+    "rows_flagged": 3380,
+    "by_code": {
+     "mmsi_malformed": 0,
+     "mmsi_non_vessel_mid": 2032,
+     "ts_missing": 0,
+     "coord_missing": 0,
+     "coord_out_of_range": 0,
+     "null_island": 0,
+     "sog_sentinel": 0,
+     "sog_invalid": 0,
+     "sog_implausible": 31,
+     "cog_sentinel": 0,
+     "cog_invalid": 0,
+     "heading_sentinel": 0,
+     "heading_invalid": 0,
+     "exact_duplicate": 280,
+     "ts_conflict": 0,
+     "high_rate": 0,
+     "implausible_jump": 1103
+    },
+    "seconds": 7.33
+   },
+   "gaps": {
+    "n_gaps": 18575,
+    "n_vessels_with_gaps": 6977,
+    "median_gap_min": 20.966666666666665,
+    "p90_gap_min": 75.6800000000001,
+    "by_class": {
+     "stationary_reporting_gap": 13961,
+     "underway_reporting_gap": 3211,
+     "possible_coverage_exit": 1403
+    },
+    "t_first": 1767225600.0,
+    "t_last": 1767275181.0,
+    "seconds": 1.23,
+    "config": {
+     "high_rate_per_min": 4,
+     "implied_speed_max_kn": 60.0,
+     "implied_speed_min_dist_m": 1000.0,
+     "sog_implausible_kn": 50.0,
+     "gap_min_s": 600,
+     "gap_cadence_mult": 5.0,
+     "sparse_cell_deg": 0.5,
+     "sparse_cell_max_vessels": 5,
+     "max_gap_rows_saved": 200000,
+     "synth_vessels": 400,
+     "synth_seed": 0
+    }
+   },
+   "synthetic_gap_test": {
+    "delayed": {
+     "n_injected": 200,
+     "n_should_detect": 179,
+     "realtime_recall": 0.9553072625698324,
+     "false_alarm_short_events": 0,
+     "retrospective_relabelled_as_delay": 1.0
+    },
+    "missing": {
+     "n_injected": 200,
+     "n_should_detect": 171,
+     "realtime_recall": 0.9707602339181286,
+     "false_alarm_short_events": 0,
+     "retrospective_gap_recall": 1.0
+    }
+   },
+   "seconds": 9.25
+  },
+  "traffic_density": {
+   "defer_penalty": 1.0000000868213093,
+   "n_units": 2686,
+   "n_train_origins": 12,
+   "n_test_origins": 25,
+   "n_train_rows": 32232,
+   "train_seconds": 1.26,
+   "split_t": 1767250390.5,
+   "test_window_edges_t": [
+    1767250800.0,
+    1767255300.0,
+    1767259800.0,
+    1767264300.0,
+    1767268800.0,
+    1767273300.0
+   ],
+   "n_dense_units": 426,
+   "seconds": 24.61,
+   "status": "completed",
+   "corruption_logs": [
+    {
+     "real_rows_affected_period": 516688,
+     "omitted_rows": 23427,
+     "duplicated_rows": 155232,
+     "ghost_rows": 140856,
+     "ghost_kinds": {
+      "invalid_mmsi": 70329,
+      "transient": 49555,
+      "persistent": 20972
+     },
+     "seed": 0,
+     "severity": 1.0
+    },
+    {
+     "real_rows_affected_period": 516688,
+     "omitted_rows": 23348,
+     "duplicated_rows": 155095,
+     "ghost_rows": 140899,
+     "ghost_kinds": {
+      "invalid_mmsi": 70467,
+      "transient": 49209,
+      "persistent": 21223
+     },
+     "seed": 1,
+     "severity": 1.0
+    },
+    {
+     "real_rows_affected_period": 516688,
+     "omitted_rows": 23500,
+     "duplicated_rows": 154644,
+     "ghost_rows": 140829,
+     "ghost_kinds": {
+      "invalid_mmsi": 70269,
+      "transient": 49339,
+      "persistent": 21221
+     },
+     "seed": 2,
+     "severity": 1.0
+    }
+   ],
+   "features": [
+    "h0",
+    "h1",
+    "h2",
+    "q0",
+    "h3",
+    "trend",
+    "recent_share",
+    "log_msgs_h0",
+    "msgs_per_vessel",
+    "lat",
+    "lon",
+    "log_area"
+   ],
+   "model_path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\website\\cache\\models\\subset1\\traffic_density.pkl",
+   "config": {
+    "bucket_s": 900,
+    "window_buckets": 4,
+    "lookback_buckets": 12,
+    "cell_deg": 0.25,
+    "dense_min_mean": 5.0,
+    "train_time_frac": 0.5,
+    "n_windows": 5,
+    "seeds": [
+     0,
+     1,
+     2
+    ],
+    "delay_schedule": [
+     0.1,
+     0.2,
+     0.3,
+     0.45,
+     0.6
+    ],
+    "delay_max_buckets": 4,
+    "ghost_schedule": [
+     0.1,
+     0.2,
+     0.3,
+     0.45,
+     0.6
+    ],
+    "omission_rate": 0.1,
+    "duplicate_rate": 0.3,
+    "feed_complete_ratio": 0.5,
+    "max_delay_defer_buckets": 3,
+    "min_msgs_per_vessel": 2,
+    "port_zone_deg": 0.1,
+    "port_min_vessels": 10,
+    "port_max_zones": 60,
+    "max_train_rows": 300000
+   }
+  },
+  "destination": {
+   "n_vessel_buckets": 1047108,
+   "n_dwell_events": 40093,
+   "n_arrival_dwells": 3952,
+   "n_zones": 602,
+   "split_t": 1767250500.0,
+   "data_t": [
+    1767225600,
+    1767275400
+   ],
+   "status_counts": {
+    "train": {
+     "censored": 12343,
+     "arrival_zone": 3335,
+     "arrival_unzoned": 1584,
+     "no_arrival_in_window": 769
+    },
+    "test": {
+     "censored": 4722,
+     "arrival_zone": 981,
+     "arrival_unzoned": 649,
+     "no_arrival_in_window": 286
+    }
+   },
+   "n_train_labeled": 3335,
+   "n_test_labeled": 981,
+   "n_test_scored": 978,
+   "n_train_classes": 311,
+   "n_test_classes": 157,
+   "n_train_candidate_rows": 53139,
+   "train_seconds": 1.55,
+   "n_test_vessels": 279,
+   "n_train_vessels": 899,
+   "test_window_edges_t": [
+    1767250800.0,
+    1767255240.0000002,
+    1767259680.0000005,
+    1767264120.0000005,
+    1767268560.0000007,
+    1767273000.000001
+   ],
+   "seconds": 17.36,
+   "status": "completed",
+   "features": [
+    "dist_km",
+    "bdiff",
+    "along_km",
+    "cross_km",
+    "eta_h",
+    "dist_rank",
+    "bdiff_rank",
+    "log_zone_vessels",
+    "log_zone_arrivals",
+    "is_last_zone",
+    "dist_last_zone_km",
+    "sog",
+    "vessel_type",
+    "n_candidates"
+   ],
+   "config": {
+    "bucket_s": 600,
+    "dwell_max_sog_kn": 1.0,
+    "dwell_min_buckets": 3,
+    "underway_min_sog_kn": 3.0,
+    "arrival_lookback_buckets": 6,
+    "zone_deg": 0.05,
+    "zone_min_vessels": 3,
+    "window_s": 21600,
+    "anchor_spacing_s": 1800,
+    "train_time_frac": 0.5,
+    "max_candidates": 25,
+    "min_radius_km": 20.0,
+    "max_radius_km": 150.0,
+    "abstain_score": 0.15,
+    "max_age_defer_s": 1200,
+    "n_windows": 5,
+    "seeds": [
+     0,
+     1,
+     2
+    ]
+   },
+   "model_path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\website\\cache\\models\\subset1\\destination.pkl"
+  },
+  "port_occupancy": {
+   "defer_penalty": 4.0,
+   "n_units": 60,
+   "n_train_origins": 12,
+   "n_test_origins": 25,
+   "n_train_rows": 720,
+   "train_seconds": 0.41,
+   "split_t": 1767250390.5,
+   "test_window_edges_t": [
+    1767250800.0,
+    1767255300.0,
+    1767259800.0,
+    1767264300.0,
+    1767268800.0,
+    1767273300.0
+   ],
+   "n_dense_units": 60,
+   "seconds": 6.43,
+   "status": "completed",
+   "corruption_logs": [
+    {
+     "real_rows_affected_period": 173062,
+     "omitted_rows": 7893,
+     "duplicated_rows": 52120,
+     "ghost_rows": 47316,
+     "ghost_kinds": {
+      "invalid_mmsi": 23542,
+      "transient": 16602,
+      "persistent": 7172
+     },
+     "seed": 0,
+     "severity": 1.0
+    },
+    {
+     "real_rows_affected_period": 173062,
+     "omitted_rows": 7766,
+     "duplicated_rows": 52244,
+     "ghost_rows": 46867,
+     "ghost_kinds": {
+      "invalid_mmsi": 23473,
+      "transient": 16360,
+      "persistent": 7034
+     },
+     "seed": 1,
+     "severity": 1.0
+    },
+    {
+     "real_rows_affected_period": 173062,
+     "omitted_rows": 7809,
+     "duplicated_rows": 51821,
+     "ghost_rows": 46816,
+     "ghost_kinds": {
+      "invalid_mmsi": 23404,
+      "transient": 16326,
+      "persistent": 7086
+     },
+     "seed": 2,
+     "severity": 1.0
+    }
+   ],
+   "features": [
+    "h0",
+    "h1",
+    "h2",
+    "q0",
+    "h3",
+    "trend",
+    "recent_share",
+    "log_msgs_h0",
+    "msgs_per_vessel",
+    "lat",
+    "lon",
+    "log_area"
+   ],
+   "model_path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\website\\cache\\models\\subset1\\port_occupancy.pkl",
+   "config": {
+    "bucket_s": 900,
+    "window_buckets": 4,
+    "lookback_buckets": 12,
+    "cell_deg": 0.25,
+    "dense_min_mean": 5.0,
+    "train_time_frac": 0.5,
+    "n_windows": 5,
+    "seeds": [
+     0,
+     1,
+     2
+    ],
+    "delay_schedule": [
+     0.1,
+     0.2,
+     0.3,
+     0.45,
+     0.6
+    ],
+    "delay_max_buckets": 4,
+    "ghost_schedule": [
+     0.1,
+     0.2,
+     0.3,
+     0.45,
+     0.6
+    ],
+    "omission_rate": 0.1,
+    "duplicate_rate": 0.3,
+    "feed_complete_ratio": 0.5,
+    "max_delay_defer_buckets": 3,
+    "min_msgs_per_vessel": 2,
+    "port_zone_deg": 0.1,
+    "port_min_vessels": 10,
+    "port_max_zones": 60,
+    "max_train_rows": 300000
+   }
+  }
  }
 }

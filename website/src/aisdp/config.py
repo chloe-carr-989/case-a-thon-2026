@@ -6,17 +6,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]      # website/ (project root)
 REPO_ROOT = ROOT.parent                          # repository root, which holds data/
-DATA_DIR = REPO_ROOT / "data" / "dataset3" / "ais-2026-01-01.csv"
+DATA_DIR = REPO_ROOT / "data" / "dataset3"
+DAYS_DIR = DATA_DIR / "marine_2026-01"
+SUBSETS_DIR = DATA_DIR / "marine_subsets"
 CACHE_DIR = ROOT / "cache"
 RESULTS_DIR = ROOT / "results"
 
-# Organizer-provided files. They are nested head-prefixes of the full day file.
+# Organizer-provided files. The subsets are nested head-prefixes of the full day file.
+# A value may be a list of daily files; they are ingested together into one day-partitioned dataset.
 SUBSETS = {
-    "subset4": DATA_DIR / "jan_01_subset_4.csv",
-    "subset3": DATA_DIR / "jan_01_subset_3.csv",
-    "subset2": DATA_DIR / "jan_01_subset_2.csv",
-    "subset1": DATA_DIR / "jan_01_subset_1.csv",
-    "full": DATA_DIR / "ais-2026-01-01.csv",
+    "subset4": SUBSETS_DIR / "jan_01_subset_4.csv",
+    "subset3": SUBSETS_DIR / "jan_01_subset_3.csv",
+    "subset2": SUBSETS_DIR / "jan_01_subset_2.csv",
+    "subset1": SUBSETS_DIR / "jan_01_subset_1.csv",
+    "full": DAYS_DIR / "ais-2026-01-01.csv",
+    "jan01_02": [DAYS_DIR / "ais-2026-01-01.csv", DAYS_DIR / "ais-2026-01-02.csv"],
 }
 
 # (lon_min, lat_min, lon_max, lat_max)
@@ -66,3 +70,71 @@ class ExperimentConfig:
         d["stale_schedule"] = list(self.stale_schedule)
         d["lowq_schedule"] = list(self.lowq_schedule)
         return d
+
+
+# ---------------------------------------------------------------- expansion tasks (see info/CLAUDE_MVP_EXPANSION_SPEC.md)
+TASKS = ["position_15m", "destination", "port_occupancy", "traffic_density"]
+
+
+@dataclass
+class QualityConfig:
+    """Thresholds for the record-level integrity flags and observation/reporting gap detection."""
+    high_rate_per_min: int = 4          # > this many reports from one MMSI in one UTC minute
+    implied_speed_max_kn: float = 60.0  # between consecutive fixes ...
+    implied_speed_min_dist_m: float = 1000.0  # ... and only if they are > 1 km apart (GPS jitter at short dt)
+    sog_implausible_kn: float = 50.0    # informational: valid encoding but implausible for most vessels
+    gap_min_s: int = 600                # a gap is > max(gap_min_s, gap_cadence_mult * vessel median cadence)
+    gap_cadence_mult: float = 5.0
+    sparse_cell_deg: float = 0.5        # reception-coverage proxy for "possible coverage exit"
+    sparse_cell_max_vessels: int = 5
+    max_gap_rows_saved: int = 200_000
+    synth_vessels: int = 400            # synthetic withheld-record test
+    synth_seed: int = 0
+
+
+@dataclass
+class CountConfig:
+    """Shared count forecasting (traffic density on grid cells, port occupancy proxy on study zones)."""
+    bucket_s: int = 900                 # 15-minute buckets
+    window_buckets: int = 4             # target = unique MMSIs in the next 60 minutes
+    lookback_buckets: int = 12          # features use at most the previous 3 hours
+    cell_deg: float = 0.25              # density grid resolution (area computed on the sphere)
+    dense_min_mean: float = 5.0         # dense cell = train-period mean count >= 5
+    train_time_frac: float = 0.5        # origins whose target window ends before split_t train the model
+    n_windows: int = 5
+    seeds: tuple = (0, 1, 2)
+    # simulated feed degradation (labelled SYNTHETIC), per chronological test window
+    delay_schedule: tuple = (0.10, 0.20, 0.30, 0.45, 0.60)   # share of origins whose latest buckets are late
+    delay_max_buckets: int = 4
+    ghost_schedule: tuple = (0.10, 0.20, 0.30, 0.45, 0.60)   # synthetic ghost vessel-buckets per real one
+    omission_rate: float = 0.10         # share of real vessel-buckets lost, scaled by the window's ghost share / 0.6
+    duplicate_rate: float = 0.30        # share of real vessel-buckets whose messages are tripled
+    # countermeasure (fixed a priori)
+    feed_complete_ratio: float = 0.5    # latest bucket volume / trailing median below this = late feed
+    max_delay_defer_buckets: int = 3    # >= 45 min of missing recent feed -> defer
+    min_msgs_per_vessel: int = 2        # in the lookback window; single-message transients are dropped
+    port_zone_deg: float = 0.1
+    port_min_vessels: int = 10          # train-period distinct dwelling vessels to define a port/anchorage study zone
+    port_max_zones: int = 60
+    max_train_rows: int = 300_000
+
+
+@dataclass
+class DestinationConfig:
+    bucket_s: int = 600                 # 10-minute buckets for dwell detection
+    dwell_max_sog_kn: float = 1.0
+    dwell_min_buckets: int = 3          # >= 30 min of sustained low speed = a dwell
+    underway_min_sog_kn: float = 3.0
+    arrival_lookback_buckets: int = 6   # dwell counts as an arrival if underway within the previous 60 min
+    zone_deg: float = 0.05              # inferred arrival zone = 0.05 deg grid cell
+    zone_min_vessels: int = 3           # distinct vessels dwelling there in the training period
+    window_s: int = 6 * 3600            # next arrival must start within 6 h of the decision
+    anchor_spacing_s: int = 1800        # at most one decision per vessel per 30 minutes
+    train_time_frac: float = 0.5
+    max_candidates: int = 25
+    min_radius_km: float = 20.0
+    max_radius_km: float = 150.0
+    abstain_score: float = 0.15         # top normalised model score below this -> "unknown"
+    max_age_defer_s: int = 1200
+    n_windows: int = 5
+    seeds: tuple = (0, 1, 2)

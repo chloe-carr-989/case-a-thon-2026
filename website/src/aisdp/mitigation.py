@@ -99,3 +99,62 @@ def unmitigated_predict(s: pd.DataFrame, decision_t, target_t, model: dict) -> d
     cve, cvn = cv_baseline(s["sog"].to_numpy(float), s["cog"].to_numpy(float))
     clat, clon = project(s["lat"].to_numpy(float), s["lon"].to_numpy(float), cve, cvn, dt)
     return {"pred_lat": plat, "pred_lon": plon, "cv_lat": clat, "cv_lon": clon}
+
+
+def sanitize_state(s: pd.DataFrame, decision_t, cfg: ExperimentConfig) -> dict:
+    """The same a-priori checks as `mitigated_predict`, exposed for other tasks (destination).
+
+    Returns a cleaned, age-compensated current position estimate with SOG/COG, flag codes and a defer
+    mask. Uses only the delivered state (and its previous fix): never the unmodified original.
+    """
+    decision_t = np.asarray(decision_t, float)
+    age = decision_t - s["state_t"].to_numpy(float)
+    lat, lon = s["lat"].to_numpy(float).copy(), s["lon"].to_numpy(float).copy()
+    sog, cog = s["sog"].to_numpy(float).copy(), s["cog"].to_numpy(float).copy()
+    prev_sog = s["prev_sog"].to_numpy(float).copy()
+    prev_cog = s["prev_cog"].to_numpy(float).copy()
+    bad_sog = ~np.isfinite(sog) | (sog > cfg.max_valid_sog_kn)
+    bad_cog = ~np.isfinite(cog) | (cog >= 360)
+    sog[bad_sog], cog[bad_cog] = np.nan, np.nan
+    prev_sog[~np.isfinite(prev_sog) | (prev_sog > cfg.max_valid_sog_kn)] = np.nan
+    prev_cog[~np.isfinite(prev_cog) | (prev_cog >= 360)] = np.nan
+    has_prev = np.isfinite(s["prev_t"].to_numpy(float))
+    dt_prev = s["state_t"].to_numpy(float) - s["prev_t"].to_numpy(float)
+    dist = haversine_m(s["prev_lat"].to_numpy(float), s["prev_lon"].to_numpy(float), lat, lon)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        implied = dist / dt_prev
+    rep_v = np.fmax(sog, prev_sog) * KN_TO_MS
+    limit = np.where(np.isfinite(rep_v), np.maximum(2.0 * rep_v + 2.5, 2.5), cfg.max_valid_sog_kn * KN_TO_MS)
+    pos_flag = has_prev & (implied > limit)
+    clean = s.copy()
+    clean["sog"], clean["cog"], clean["prev_sog"], clean["prev_cog"] = sog, cog, prev_sog, prev_cog
+    X = make_features(clean, decision_t)
+    ve_rep, vn_rep = X["ve_rep"].to_numpy(), X["vn_rep"].to_numpy()
+    ve_obs, vn_obs = X["ve_obs"].to_numpy(), X["vn_obs"].to_numpy()
+    vdiff = np.hypot(ve_rep - ve_obs, vn_rep - vn_obs)
+    kin_flag = has_prev & ~pos_flag & np.isfinite(vdiff) & (vdiff > np.maximum(3.0, 0.5 * np.hypot(ve_rep, vn_rep)))
+    missing_kin = bad_sog | bad_cog
+    use_obs = (kin_flag | missing_kin) & has_prev & ~pos_flag
+    ve = np.where(use_obs, ve_obs, ve_rep)
+    vn = np.where(use_obs, vn_obs, vn_rep)
+    # implausible jump: fall back to the previous (credible) fix and its own kinematics
+    fb = pos_flag & np.isfinite(prev_sog) & np.isfinite(prev_cog)
+    fve, fvn = sog_cog_to_ve_vn(prev_sog, prev_cog)
+    base_t = np.where(fb, s["prev_t"].to_numpy(float), s["state_t"].to_numpy(float))
+    lat = np.where(fb, s["prev_lat"].to_numpy(float), lat)
+    lon = np.where(fb, s["prev_lon"].to_numpy(float), lon)
+    ve, vn = np.where(fb, fve, ve), np.where(fb, fvn, vn)
+    ok_v = np.isfinite(ve) & np.isfinite(vn)
+    comp = ok_v & ((decision_t - base_t) > cfg.age_comp_s) & ((decision_t - base_t) <= cfg.max_age_defer_s)
+    clat, clon = project(lat, lon, np.where(comp, ve, 0.0), np.where(comp, vn, 0.0), decision_t - base_t)
+    sp = np.hypot(ve, vn)
+    out_sog = np.where(ok_v, sp / KN_TO_MS, np.nan)
+    out_cog = np.where(ok_v & (sp > 0), np.degrees(np.arctan2(ve, vn)) % 360, np.nan)
+    defer = (age > cfg.max_age_defer_s) | (pos_flag & ~fb) | (missing_kin & ~has_prev)
+    flags = np.array([""] * len(s), dtype=object)
+    for m, tag in [(age > cfg.age_comp_s, "stale_report"), (age > cfg.max_age_defer_s, "too_old"),
+                   (pos_flag, "implausible_jump"), (kin_flag, "sog_cog_inconsistent"),
+                   (missing_kin, "invalid_or_missing_sog_cog"), (~has_prev, "no_recent_track")]:
+        flags[m] = flags[m] + tag + ";"
+    return {"lat": clat, "lon": clon, "sog": out_sog, "cog": out_cog, "age_s": age, "defer": defer,
+            "flags": flags, "fallback": fb, "age_compensated": comp}

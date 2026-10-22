@@ -2,7 +2,7 @@
  "model_info": {
   "train_rows": 7689,
   "train_vessels": 2436,
-  "train_seconds": 2.62,
+  "train_seconds": 2.58,
   "features": [
    "sog",
    "cog_sin",
@@ -59,7 +59,7 @@
    "reliable": 14915
   }
  },
- "seconds": 5.07,
+ "seconds": 5.09,
  "subset": "subset2",
  "profile": {
   "rows": 589669,
@@ -100,7 +100,7 @@
   "end": null,
   "max_rows": null,
   "ingest_seconds": 0.63,
-  "cache_hit": false
+  "cache_hit": true
  },
  "config": {
   "horizon_s": 900,
@@ -143,5 +143,117 @@
   "defer_quality": 0.35,
   "region": "all",
   "extra": {}
+ },
+ "tasks": {
+  "data_quality": {
+   "status": "completed",
+   "flags": {
+    "rows": 589669,
+    "rows_flagged": 498,
+    "by_code": {
+     "mmsi_malformed": 0,
+     "mmsi_non_vessel_mid": 302,
+     "ts_missing": 0,
+     "coord_missing": 0,
+     "coord_out_of_range": 0,
+     "null_island": 0,
+     "sog_sentinel": 0,
+     "sog_invalid": 0,
+     "sog_implausible": 0,
+     "cog_sentinel": 0,
+     "cog_invalid": 0,
+     "heading_sentinel": 0,
+     "heading_invalid": 0,
+     "exact_duplicate": 9,
+     "ts_conflict": 0,
+     "high_rate": 0,
+     "implausible_jump": 197
+    },
+    "seconds": 1.06
+   },
+   "gaps": {
+    "n_gaps": 1384,
+    "n_vessels_with_gaps": 1144,
+    "median_gap_min": 18.033333333333335,
+    "p90_gap_min": 36.21333333333334,
+    "by_class": {
+     "stationary_reporting_gap": 1027,
+     "possible_coverage_exit": 195,
+     "underway_reporting_gap": 162
+    },
+    "t_first": 1767225600.0,
+    "t_last": 1767232668.0,
+    "seconds": 0.23,
+    "config": {
+     "high_rate_per_min": 4,
+     "implied_speed_max_kn": 60.0,
+     "implied_speed_min_dist_m": 1000.0,
+     "sog_implausible_kn": 50.0,
+     "gap_min_s": 600,
+     "gap_cadence_mult": 5.0,
+     "sparse_cell_deg": 0.5,
+     "sparse_cell_max_vessels": 5,
+     "max_gap_rows_saved": 200000,
+     "synth_vessels": 400,
+     "synth_seed": 0
+    }
+   },
+   "synthetic_gap_test": {
+    "delayed": {
+     "n_injected": 200,
+     "n_should_detect": 193,
+     "realtime_recall": 0.9896373056994818,
+     "false_alarm_short_events": 0,
+     "retrospective_relabelled_as_delay": 1.0
+    },
+    "missing": {
+     "n_injected": 200,
+     "n_should_detect": 183,
+     "realtime_recall": 0.9781420765027322,
+     "false_alarm_short_events": 0,
+     "retrospective_gap_recall": 1.0
+    }
+   },
+   "seconds": 1.52
+  },
+  "traffic_density": {
+   "status": "insufficient_data",
+   "reason": "not enough complete 60-min forecast origins (train=0, test=0; need >=4 / >=2, each needs 3 h lookback + 1 h target)",
+   "seconds": 0.13
+  },
+  "destination": {
+   "status": "insufficient_data",
+   "reason": "insufficient labeled arrivals (train=31, test=5, train zones=24; need >=200 / >=30 / >=3)",
+   "seconds": 0.21,
+   "n_vessel_buckets": 149428,
+   "n_dwell_events": 12700,
+   "n_arrival_dwells": 552,
+   "n_zones": 160,
+   "split_t": 1767229200.0,
+   "data_t": [
+    1767225600,
+    1767232800
+   ],
+   "status_counts": {
+    "train": {
+     "censored": 2702,
+     "arrival_unzoned": 95,
+     "arrival_zone": 31
+    },
+    "test": {
+     "censored": 1210,
+     "arrival_unzoned": 29,
+     "arrival_zone": 5
+    }
+   },
+   "n_train_labeled": 31,
+   "n_test_labeled": 5,
+   "n_train_classes": 24
+  },
+  "port_occupancy": {
+   "status": "insufficient_data",
+   "reason": "not enough complete 60-min forecast origins (train=0, test=0; need >=4 / >=2, each needs 3 h lookback + 1 h target)",
+   "seconds": 0.06
+  }
  }
 }

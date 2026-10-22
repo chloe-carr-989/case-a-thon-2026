@@ -1,0 +1,126 @@
+{
+ "subset": "subset3",
+ "profile": {
+  "rows": 200,
+  "vessels": 200,
+  "time_min": "2026-01-01 00:00:00",
+  "time_max": "2026-01-01 00:00:28",
+  "lat_min": 18.02828,
+  "lat_max": 49.42623,
+  "lon_min": -156.51166,
+  "lon_max": -65.24261,
+  "null_rate_sog": 0.005,
+  "null_rate_cog": 0.105,
+  "null_rate_heading": 0.34,
+  "null_rate_vessel_type": 0.015,
+  "sentinel_sog_102_3": 0,
+  "sentinel_cog_ge_360": 0,
+  "sentinel_heading_511": 0,
+  "invalid_lat_lon": 0,
+  "null_island_0_0": 0,
+  "sog_over_40kn_not_sentinel": 0,
+  "duplicate_mmsi_timestamp_rows": 0,
+  "transceiver_class_counts": {
+   "A": 192,
+   "B": 8
+  }
+ },
+ "ingest": {
+  "source": {
+   "path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\data\\dataset3\\ais-2026-01-01.csv\\jan_01_subset_3.csv",
+   "bytes": 21440,
+   "mtime": 1792350151.8250139,
+   "hash": "bc74f53c24d3b796cf0ea33d2ff30a47b046104cbe27eed8ff1db05c8a0682d1",
+   "hash_mode": "sha256_full"
+  },
+  "parquet_dir": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\website\\cache\\parquet\\subset3_all_e10b5060e7be",
+  "region": "all",
+  "start": null,
+  "end": null,
+  "max_rows": null,
+  "ingest_seconds": 0.04,
+  "cache_hit": true
+ },
+ "tasks": {
+  "data_quality": {
+   "status": "completed",
+   "flags": {
+    "rows": 200,
+    "rows_flagged": 0,
+    "by_code": {
+     "mmsi_malformed": 0,
+     "mmsi_non_vessel_mid": 0,
+     "ts_missing": 0,
+     "coord_missing": 0,
+     "coord_out_of_range": 0,
+     "null_island": 0,
+     "sog_sentinel": 0,
+     "sog_invalid": 0,
+     "sog_implausible": 0,
+     "cog_sentinel": 0,
+     "cog_invalid": 0,
+     "heading_sentinel": 0,
+     "heading_invalid": 0,
+     "exact_duplicate": 0,
+     "ts_conflict": 0,
+     "high_rate": 0,
+     "implausible_jump": 0
+    },
+    "seconds": 0.04
+   },
+   "gaps": {
+    "n_gaps": 0,
+    "n_vessels_with_gaps": 0,
+    "median_gap_min": null,
+    "p90_gap_min": null,
+    "by_class": {},
+    "t_first": 1767225600.0,
+    "t_last": 1767225628.0,
+    "seconds": 0.03,
+    "config": {
+     "high_rate_per_min": 4,
+     "implied_speed_max_kn": 60.0,
+     "implied_speed_min_dist_m": 1000.0,
+     "sog_implausible_kn": 50.0,
+     "gap_min_s": 600,
+     "gap_cadence_mult": 5.0,
+     "sparse_cell_deg": 0.5,
+     "sparse_cell_max_vessels": 5,
+     "max_gap_rows_saved": 200000,
+     "synth_vessels": 400,
+     "synth_seed": 0
+    }
+   },
+   "synthetic_gap_test": {},
+   "seconds": 0.09
+  },
+  "position_15m": {
+   "status": "insufficient_data",
+   "reason": "insufficient target pairs for a 900s horizon (train=0, test=0; need >=200 / >=100)"
+  },
+  "traffic_density": {
+   "status": "insufficient_data",
+   "reason": "not enough complete 60-min forecast origins (train=0, test=0; need >=4 / >=2, each needs 3 h lookback + 1 h target)",
+   "seconds": 0.02
+  },
+  "destination": {
+   "status": "insufficient_data",
+   "reason": "only 0 inferred arrival zones from the training period (0 dwell events); need >= 3",
+   "seconds": 0.03,
+   "n_vessel_buckets": 200,
+   "n_dwell_events": 0,
+   "n_arrival_dwells": 0,
+   "n_zones": 0,
+   "split_t": 1767225900.0,
+   "data_t": [
+    1767225600,
+    1767226200
+   ]
+  },
+  "port_occupancy": {
+   "status": "insufficient_data",
+   "reason": "no port/anchorage study zones could be derived from the training period",
+   "seconds": 0.0
+  }
+ }
+}
