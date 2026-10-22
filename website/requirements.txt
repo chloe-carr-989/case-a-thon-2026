@@ -1,0 +1,9 @@
+# Verified with Python 3.14.7 on Windows 11 (exact versions used: see results/manifest.json)
+duckdb>=2.0,<3
+pandas>=3.0,<4
+numpy>=2.5,<3
+scikit-learn>=1.9,<2
+pyarrow>=26,<27
+streamlit>=1.66,<2
+plotly>=7.1,<8
+pytest>=9,<10

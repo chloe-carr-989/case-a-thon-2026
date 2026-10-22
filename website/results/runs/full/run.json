@@ -1,0 +1,147 @@
+{
+ "model_info": {
+  "train_rows": 109919,
+  "train_vessels": 2291,
+  "train_seconds": 3.76,
+  "features": [
+   "sog",
+   "cog_sin",
+   "cog_cos",
+   "ve_rep",
+   "vn_rep",
+   "hdg_sin",
+   "hdg_cos",
+   "ve_obs",
+   "vn_obs",
+   "dt_prev",
+   "prev_sog",
+   "dcog",
+   "vessel_type",
+   "hour"
+  ]
+ },
+ "reports": {
+  "report_rows": 1974504,
+  "sampled_vessels": 4000,
+  "t0": 1767225600.0,
+  "t1": 1767311999.0
+ },
+ "defer_penalty_km": 0.38481425489801024,
+ "n_test_cases": 57160,
+ "n_test_vessels": 1060,
+ "n_train_cases": 109919,
+ "split_t": 1767264479.55,
+ "window_edges": [
+  1767265380.0,
+  1767274544.0000002,
+  1767283708.0000005,
+  1767292872.0000005,
+  1767302036.0000007,
+  1767311200.000001
+ ],
+ "volumes": {
+  "0": {
+   "reliable": 61365
+  },
+  "1": {
+   "reliable": 64108
+  },
+  "2": {
+   "reliable": 64626
+  },
+  "3": {
+   "reliable": 63804
+  },
+  "4": {
+   "reliable": 64034
+  },
+  "all": {
+   "reliable": 317937
+  }
+ },
+ "seconds": 20.63,
+ "subset": "full",
+ "profile": {
+  "rows": 8497825,
+  "vessels": 17123,
+  "time_min": "2026-01-01 00:00:00",
+  "time_max": "2026-01-01 23:59:59",
+  "lat_min": 1.30646,
+  "lat_max": 85.71106,
+  "lon_min": -178.34985,
+  "lon_max": 167.87544,
+  "null_rate_sog": 0.002200092376578713,
+  "null_rate_cog": 0.17479966932715135,
+  "null_rate_heading": 0.4896578830465443,
+  "null_rate_vessel_type": 0.006365981883599627,
+  "sentinel_sog_102_3": 0,
+  "sentinel_cog_ge_360": 0,
+  "sentinel_heading_511": 0,
+  "invalid_lat_lon": 0,
+  "null_island_0_0": 0,
+  "sog_over_40kn_not_sentinel": 307,
+  "duplicate_mmsi_timestamp_rows": 1059,
+  "transceiver_class_counts": {
+   "A": 6146461,
+   "B": 2351364
+  }
+ },
+ "ingest": {
+  "source": {
+   "path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\data\\dataset3\\ais-2026-01-01.csv\\ais-2026-01-01.csv",
+   "bytes": 868700202,
+   "mtime": 1792340897.2621953,
+   "hash": "1d8cdaad7ad3051d632eecc2d7def37299c2b175851517af73c127f48353d1a1",
+   "hash_mode": "sha256_full"
+  },
+  "parquet_dir": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\website\\cache\\parquet\\full_all_0f4bbb05e5ea",
+  "region": "all",
+  "start": null,
+  "end": null,
+  "max_rows": null,
+  "ingest_seconds": 4.7,
+  "cache_hit": false
+ },
+ "config": {
+  "horizon_s": 900,
+  "tol_s": 120,
+  "anchor_spacing_s": 600,
+  "min_history_s": 2700,
+  "prev_gap_min_s": 60,
+  "prev_gap_max_s": 900,
+  "sample_vessels": 4000,
+  "train_time_frac": 0.45,
+  "test_vessel_mod": 10,
+  "test_vessel_cut": 3,
+  "max_train_rows": 200000,
+  "n_windows": 5,
+  "seeds": [
+   0,
+   1,
+   2
+  ],
+  "stale_schedule": [
+   0.1,
+   0.2,
+   0.3,
+   0.45,
+   0.6
+  ],
+  "stale_delay_min_s": 300,
+  "stale_delay_max_s": 2700,
+  "lowq_schedule": [
+   0.1,
+   0.2,
+   0.3,
+   0.45,
+   0.6
+  ],
+  "severity": 1.0,
+  "age_comp_s": 120,
+  "max_age_defer_s": 1200,
+  "max_valid_sog_kn": 40.0,
+  "defer_quality": 0.35,
+  "region": "all",
+  "extra": {}
+ }
+}

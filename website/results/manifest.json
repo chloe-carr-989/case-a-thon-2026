@@ -1,0 +1,221 @@
+{
+ "generated_utc": "2026-10-22T18:21:28+00:00",
+ "default_demo_subset": "full",
+ "dataset": {
+  "name": "MarineCadastre / NOAA AIS vessel traffic, broadcast-point CSV, 2026-01-01",
+  "source_hub_url": "https://hub.marinecadastre.gov/pages/vesseltraffic (per case prompt; not re-verified offline)",
+  "product": "daily CSV (compressed .csv.zst present locally); not the GeoParquet product",
+  "retrieval_date": "unknown (local file mtime of .zst: 2026-10-18; organizer-provided subsets)",
+  "local_files": {
+   "subset4": {
+    "path": "data/dataset3/ais-2026-01-01.csv/jan_01_subset_4.csv",
+    "bytes": 881
+   },
+   "subset3": {
+    "path": "data/dataset3/ais-2026-01-01.csv/jan_01_subset_3.csv",
+    "bytes": 21440
+   },
+   "subset2": {
+    "path": "data/dataset3/ais-2026-01-01.csv/jan_01_subset_2.csv",
+    "bytes": 60462921
+   },
+   "subset1": {
+    "path": "data/dataset3/ais-2026-01-01.csv/jan_01_subset_1.csv",
+    "bytes": 433045688
+   },
+   "full": {
+    "path": "data/dataset3/ais-2026-01-01.csv/ais-2026-01-01.csv",
+    "bytes": 868700202
+   }
+  },
+  "files_used": [
+   "data/dataset3/ais-2026-01-01.csv/ais-2026-01-01.csv"
+  ],
+  "fingerprint": {
+   "path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\data\\dataset3\\ais-2026-01-01.csv\\ais-2026-01-01.csv",
+   "bytes": 868700202,
+   "mtime": 1792340897.2621953,
+   "hash": "1d8cdaad7ad3051d632eecc2d7def37299c2b175851517af73c127f48353d1a1",
+   "hash_mode": "sha256_full"
+  },
+  "subset_rules": "Organizer subsets are byte-identical head-prefixes of ais-2026-01-01.csv (verified with cmp); never combined. Region filter: all; deterministic vessel sample of 4000 MMSIs by hash key.",
+  "profile_observed": {
+   "rows": 8497825,
+   "vessels": 17123,
+   "time_min": "2026-01-01 00:00:00",
+   "time_max": "2026-01-01 23:59:59",
+   "lat_min": 1.30646,
+   "lat_max": 85.71106,
+   "lon_min": -178.34985,
+   "lon_max": 167.87544,
+   "null_rate_sog": 0.002200092376578713,
+   "null_rate_cog": 0.17479966932715135,
+   "null_rate_heading": 0.4896578830465443,
+   "null_rate_vessel_type": 0.006365981883599627,
+   "sentinel_sog_102_3": 0,
+   "sentinel_cog_ge_360": 0,
+   "sentinel_heading_511": 0,
+   "invalid_lat_lon": 0,
+   "null_island_0_0": 0,
+   "sog_over_40kn_not_sentinel": 307,
+   "duplicate_mmsi_timestamp_rows": 1059,
+   "transceiver_class_counts": {
+    "A": 6146461,
+    "B": 2351364
+   }
+  },
+  "units": {
+   "lat/lon": "WGS84 degrees",
+   "sog": "knots",
+   "cog/heading": "degrees true",
+   "base_date_time": "UTC",
+   "errors": "km (haversine, spherical earth R=6371.0088 km)"
+  },
+  "missing_value_policy": "SOG>=102.2 (102.3 sentinel) -> null; COG>=360 -> null; heading>=360 (511) -> null; lat/lon out of range or (0,0) dropped; duplicate (mmsi,timestamp) -> first kept. These are OBSERVED source problems, handled before any injected defects.",
+  "rights_statement": "NOAA/BOEM MarineCadastre data are U.S. Government public data; check the product metadata/terms before redistribution. Raw data are not redistributed in this repo (data/ is git-ignored)."
+ },
+ "task": {
+  "horizon_s": 900,
+  "target_tolerance_s": 120,
+  "evaluation_proxy": "first later AIS report of the same MMSI within horizon +/- tolerance; a noisy proxy, not verified truth",
+  "decision_spacing_s": 600
+ },
+ "split": {
+  "rule": "vessel-disjoint (hash(mmsi)%10<3 -> test) AND chronological: train targets end before split_t; test decisions start at split_t + horizon and need >=45 min of vessel history",
+  "split_t_utc": "2026-01-01 10:47:59.549999952",
+  "window_edges_utc": [
+   "2026-01-01 11:03:00",
+   "2026-01-01 13:35:44.000000238",
+   "2026-01-01 16:08:28.000000477",
+   "2026-01-01 18:41:12.000000477",
+   "2026-01-01 21:13:56.000000715",
+   "2026-01-01 23:46:40.000000954"
+  ],
+  "holdout": "window 4 (latest period) plus the 'holdout_unseen_bias' defect type not used when designing the countermeasure",
+  "n_train_cases": 109919,
+  "n_test_cases": 57160,
+  "n_test_vessels": 1060
+ },
+ "model": {
+  "type": "2x HistGradientBoostingRegressor (absolute_error) predicting mean east/north velocity",
+  "retraining": "trained once on nominal data; NOT retrained during the degradation progression",
+  "train_rows": 109919,
+  "train_vessels": 2291,
+  "train_seconds": 3.76,
+  "features": [
+   "sog",
+   "cog_sin",
+   "cog_cos",
+   "ve_rep",
+   "vn_rep",
+   "hdg_sin",
+   "hdg_cos",
+   "ve_obs",
+   "vn_obs",
+   "dt_prev",
+   "prev_sog",
+   "dcog",
+   "vessel_type",
+   "hour"
+  ]
+ },
+ "seeds": [
+  0,
+  1,
+  2
+ ],
+ "defect_configuration": {
+  "failure_stage": "inference-time AIS feed degradation",
+  "progression": "SIMULATED degradation progression over 5 real chronological test windows",
+  "stale_schedule": [
+   0.1,
+   0.2,
+   0.3,
+   0.45,
+   0.6
+  ],
+  "stale_delay_s": [
+   300,
+   2700
+  ],
+  "lowq_schedule (share of latest records from synthetic source)": [
+   0.1,
+   0.2,
+   0.3,
+   0.45,
+   0.6
+  ],
+  "synthetic_source_label": "SYN-FASTFEED",
+  "lowq_defects": "jitter N(0,200 m) on state and previous fix; 25% gross outlier 3-15 km; SOG scaled x0.3-2.5 (25%), missing (15%), raw 102.3 sentinel (10%); COG random (30%), missing (15%), else +N(0,5 deg); heading dropped",
+  "holdout_unseen_bias": "constant 1.5 km offset at bearing 60 deg on the delivered fix",
+  "severity": 1.0,
+  "synthetic_msgs_simulated": "reliable_msgs * share/(1-share); a simulated volume, not measured"
+ },
+ "modification_log": "Raw CSVs unchanged. Ingest writes cache/parquet (raw values). Cleaning and all injected defects occur in memory; injected defects are labelled per case (columns source, defects, is_stale, is_lowq) and kept separate from observed source problems.",
+ "countermeasure": {
+  "age_comp_s": 120,
+  "max_age_defer_s": 1200,
+  "max_valid_sog_kn": 40.0,
+  "defer_quality": 0.35,
+  "defer_penalty_km": 0.38481425489801024,
+  "defer_penalty_rule": "p90 of nominal unmitigated error, charged per deferred case in policy_cost_km so that abstaining on everything cannot win"
+ },
+ "config": {
+  "horizon_s": 900,
+  "tol_s": 120,
+  "anchor_spacing_s": 600,
+  "min_history_s": 2700,
+  "prev_gap_min_s": 60,
+  "prev_gap_max_s": 900,
+  "sample_vessels": 4000,
+  "train_time_frac": 0.45,
+  "test_vessel_mod": 10,
+  "test_vessel_cut": 3,
+  "max_train_rows": 200000,
+  "n_windows": 5,
+  "seeds": [
+   0,
+   1,
+   2
+  ],
+  "stale_schedule": [
+   0.1,
+   0.2,
+   0.3,
+   0.45,
+   0.6
+  ],
+  "stale_delay_min_s": 300,
+  "stale_delay_max_s": 2700,
+  "lowq_schedule": [
+   0.1,
+   0.2,
+   0.3,
+   0.45,
+   0.6
+  ],
+  "severity": 1.0,
+  "age_comp_s": 120,
+  "max_age_defer_s": 1200,
+  "max_valid_sog_kn": 40.0,
+  "defer_quality": 0.35,
+  "region": "all",
+  "extra": {}
+ },
+ "environment": {
+  "python": "3.14.7",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "cpu_count": 12,
+  "packages": {
+   "duckdb": "2.0.0",
+   "pandas": "3.1.0",
+   "numpy": "2.5.4",
+   "scikit-learn": "1.9.1",
+   "pyarrow": "26.0.0",
+   "streamlit": "1.66.1",
+   "plotly": "7.1.0"
+  },
+  "code_version": "0.1.0"
+ },
+ "ai_disclosure": "Code, documentation and experiment design were generated by Claude (Anthropic, model claude-opus-5-5) via Claude Code following info/CLAUDE_INSTRUCTIONS.md; the AI component under test is the sklearn model, not the LLM."
+}
