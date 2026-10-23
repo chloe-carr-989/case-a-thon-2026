@@ -31,8 +31,16 @@ Measured on the website default `jan01_04` (train Jan 1-3, test the unseen Jan 4
   labels exist, so real-world detection accuracy is not claimed. Component weights were chosen on a vessel-disjoint
   split of the calibration period: off-lane distance alone caught 62% of injected drifts there, an equal-weight sum of
   all four components 21%, an Isolation Forest 19%. The injected test only contains off-lane drifts.
-* Weather is real ERA5 reanalysis wind (Open-Meteo archive, fetched once by `scripts/fetch_weather.py`). It is shown
-  as context and never changes a label.
+* Weather is real ERA5 reanalysis wind (Open-Meteo archive, fetched once by `scripts/fetch_weather.py`). It is a
+  separate map layer, and each Government alert leads with a weather check (strong wind = may explain it, calm = not
+  explained by weather), but it never changes a score or label. The demo replays historical weather; deployed, this
+  would be a live feed.
+* Military and law-enforcement vessels (AIS types 35, 55) are not scored in Government mode: they do not follow
+  commercial routes. They are still in the pipeline metrics (about 1% of clean-feed alerts).
+* **Expert check:** the design was reviewed on Oct 22, 2026 with a retired U.S. Navy captain who ran civil maritime
+  intelligence analysis at the Office of Naval Intelligence. She confirmed lane deviation as the core signal, weather
+  as a separate layer you can switch on and off rather than part of the training data, commercial vessels only, and
+  AIS gaps and spoofing as the main data risks.
 
 ```powershell
 cd website
