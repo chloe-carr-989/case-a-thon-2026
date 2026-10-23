@@ -1,7 +1,5 @@
 """Model Performance: baseline vs model, the poisoning experiment (stale, unreliable, combined), the countermeasure,
 human oversight, and the study card, for the two tasks the modes show (Commercial ETA, Government anomalies)."""
-import json
-
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -147,11 +145,12 @@ with t_base:
         for pred, lab, col in [("naive_distance_speed", "baseline", BASE), ("hgb_eta", "model", ON)]:
             d = w[w.predictor == pred]
             f.add_scatter(x=XL, y=d.mae_h * 60, name=lab, mode="lines+markers", line=dict(color=col, width=2.5))
-        style(f, 260, title=dict(text="Mean ETA error by test window, clean feed (min)", font=dict(size=13)))
+        style(f, 260, title=dict(text="Mean ETA error by test window, clean feed (min, lower is better)", font=dict(size=13)))
         f.update_xaxes(ticktext=[x.split("<br>")[0] for x in XL], tickvals=XL)
         st.plotly_chart(f, width="stretch")
-        note("The model wins in every window; error swings by window with real traffic (window 4 is harder for "
-             "both), which is why results are reported per window, not one aggregate.")
+        note("The model's line sits below the baseline's in every window, so it wins every one. Error swings by "
+             "window with real traffic (window 4 is harder for both), which is why results are reported per window, "
+             "not one aggregate.")
     with c2:
         st.subheader("Government · movement anomalies")
         n0 = g(AA, condition="nominal", mitigation="none")
@@ -417,9 +416,17 @@ with t_card:
         note("<b>AI component:</b> gradient-boosted ETA models and a lane-relative anomaly score learned from 3 days "
              "of AIS, both trained once and frozen (not retrained during the test). Poisoning is applied at "
              "inference, on the feed the models read.")
+        note("<b>Expert check:</b> design reviewed in an interview (Oct 22, 2026) with a retired U.S. Navy captain "
+             "who ran civil maritime intelligence analysis at the Office of Naval Intelligence. She confirmed the "
+             "core choices: ships keep to known lanes because they are the fastest, cheapest, safest route, so a "
+             "deviation is the signal; weather is the biggest variable and belongs in a separate layer you can switch "
+             "on and off, not in the training data; score commercial vessels only, since warships behave "
+             "differently; expect AIS to go dark, be spoofed, and have gaps. Implemented: weather layer and "
+             "per-alert weather check, military vessels not scored, data integrity flags. Live weather is the "
+             "deployment step (this demo replays historical ERA5).")
         st.subheader("Next step")
         note("<b>Recommendation: controlled pilot, shadow mode.</b> Government detector + countermeasure, one port "
-             "region, 4 weeks, read-only, no automated action. Owner: model owner (ML engineer) with the AIS feed "
+             "region (New York / New Jersey), 4 weeks, read-only, no automated action. Owner: model owner (ML engineer) with the AIS feed "
              "steward. Approval: operations supervisor. Checkpoint at week 2: stop if bad-data alerts are not at "
              "least 50% below the unprotected run, or held vessels exceed 30% for two days. "
              "<b>Iterate first on the ETA:</b> its countermeasure costs more than it saves (age limit too strict).")
@@ -439,7 +446,3 @@ with t_card:
             ("Reproduce", "scripts\\run_pipeline.py --subsets jan01_04 --train-frac 0.75 ; streamlit run app\\dashboard.py"),
             ("AI use", M.get("ai_disclosure", "")),
         ], columns=["", "detail"]), hide_index=True, width="stretch", height=35 * 13 + 3)
-        with st.expander("Full run manifest (results/manifest.json)"):
-            st.code(json.dumps({k: M.get(k) for k in ("generated_utc", "default_demo_subset", "split", "seeds",
-                                                     "defect_configuration", "countermeasure", "modification_log")},
-                               indent=1), language="json")

@@ -22,9 +22,9 @@ CONDITIONS = {"nominal": "Clean feed", "stale": "Stale reports", "low_quality": 
               "combined": "Stale + unreliable"}
 # (lon_min, lat_min, lon_max, lat_max); display filters only, not port boundaries
 AREAS = {
-    "Houston / Galveston": (-95.6, 28.9, -94.3, 30.0),
+    "Houston / Galveston": (-95.6, 28.4, -94.3, 30.0),
     "Lower Mississippi": (-91.5, 29.0, -89.0, 30.7),
-    "New York Harbor": (-74.4, 40.4, -73.7, 40.95),
+    "New York / New Jersey": (-74.4, 40.4, -73.7, 40.95),
     "Chesapeake Bay": (-77.0, 36.7, -75.8, 39.4),
     "Puget Sound": (-123.2, 47.0, -122.2, 48.5),
     "San Francisco Bay": (-122.7, 37.4, -122.0, 38.2),

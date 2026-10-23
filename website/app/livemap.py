@@ -90,8 +90,8 @@ def trail_url(t0: float, t1: float) -> str | None:
     return f"app/static/trails/{name}"
 
 
-LANE_TIERS = [{"c": "rgba(73,182,220,0.22)", "w": 1.2}, {"c": "rgba(73,182,220,0.42)", "w": 1.6},
-              {"c": "rgba(73,182,220,0.7)", "w": 2.0}]
+LANE_TIERS = [{"c": "rgba(112,164,190,0.45)", "w": 1.3}, {"c": "rgba(112,164,190,0.62)", "w": 1.7},
+              {"c": "rgba(112,164,190,0.8)", "w": 2.2}]
 
 
 @st.cache_data(show_spinner=False)
@@ -103,7 +103,7 @@ def lane_url() -> str | None:
     marks a row in the same cell as the row before), so the browser draws one segment per cell for whichever vessel
     groups are selected. Traffic tier t (0-2) splits each resolution and group at its 50th and 85th percentile."""
     src = ui.RES / "lanes_cells.parquet"
-    name = hashlib.sha1(f"{src.stat().st_mtime_ns}|{TILE}".encode()).hexdigest()[:12]
+    name = hashlib.sha1(f"{src.stat().st_mtime_ns}|{TILE}|{LANE_TIERS}".encode()).hexdigest()[:12]
     out = HERE / "static" / "lanes" / name
     if (out / "index.json").exists():
         return f"app/static/lanes/{name}"
@@ -144,10 +144,12 @@ def density(area: str) -> dict | None:
     d = d[ui.in_box(d.lat, d.lon, area, 0.05)]
     if d.empty:
         return None
+    # log counts, scaled between the 5th and 99th percentile: sparse cells stay dark, only the busiest are bright
     v = np.log10(d.n_vessels_any.to_numpy(float))
-    v = (v - v.min()) / max(np.ptp(v), 1e-9)
+    lo, hi = np.percentile(v, [5, 99])
+    v = np.clip((v - lo) / max(hi - lo, 1e-9), 0, 1)
     return {"lat": d.lat.round(4).tolist(), "lon": d.lon.round(4).tolist(), "v": v.round(3).tolist(),
-            "d": 0.1 if res == "coarse" else 0.01}
+            "d": 0.1 if res == "coarse" else 0.01, "scale": ui.DENSITY_SCALE}
 
 
 @st.cache_data
@@ -176,10 +178,24 @@ def path(lat, lon, color: str, width: float, dash: bool = False, alpha: float = 
 
 
 def command(**kw):
-    """Send a one-off instruction to the browser (e.g. playing=False when a vessel is picked from a list)."""
+    """Send a one-off instruction to the browser (e.g. playing=False when a vessel is picked from a list, or T=step to
+    jump the timeline)."""
     st.session_state["map_cmd"] = {"id": st.session_state.get("map_cmd", {}).get("id", 0) + 1, **kw}
     if "playing" in kw:
         st.session_state["playing"] = kw["playing"]
+    if "T" in kw:                                    # until the browser reports the jump, the commanded step wins
+        st.session_state["T"] = st.session_state["T_cmd"] = float(kw["T"])
+
+
+def _view_t(view: dict | None) -> float | None:
+    """The browser's reported time, or a commanded jump it has not reported yet."""
+    pend = st.session_state.get("T_cmd")
+    if pend is not None:
+        if view and abs(view["T"] - pend) < 1:
+            st.session_state.pop("T_cmd")
+        else:
+            return pend
+    return view["T"] if view else None
 
 
 def current_step(key: str, steps: np.ndarray) -> float:
@@ -190,7 +206,8 @@ def current_step(key: str, steps: np.ndarray) -> float:
         view = (v.get("view") if hasattr(v, "get") else None) or None
     except Exception:
         pass
-    t = view["T"] if view else st.session_state.get("T", float(steps[0]))
+    t = _view_t(view)
+    t = st.session_state.get("T", float(steps[0])) if t is None else t
     return float(steps[max(0, np.searchsorted(steps, t, side="right") - 1)])
 
 
@@ -221,7 +238,9 @@ def render(key: str, *, area: str, steps: np.ndarray, counts: pd.Series, bars: s
         "density": density(area) if "Density" in layers else None,
         "weather": weather(area, t0, t1) if "Weather" in layers else None,
         "hud": hud, "legend": legend, "sel": sel,
-        "fit": {"key": f"{area}|{fit_box}", "box": list(fit_box)},
+        # refit when the area changes or a vessel is opened, not as its track box moves with the feed and not
+        # when a vessel is closed (livemap.js keeps the zoom)
+        "fit": {"key": f"{area}|{sel['mmsi'] if sel else None}", "area": area, "box": list(fit_box)},
         "colors": {k: ui.C[k] for k in ("bg", "water", "land", "line", "line2", "fg", "dim", "faint", "accent",
                                          "warn", "crit")},
         "catColor": ui.CAT_COLOR, "catLabel": CATEGORY_LABEL,
@@ -231,7 +250,8 @@ def render(key: str, *, area: str, steps: np.ndarray, counts: pd.Series, bars: s
     res = _render(key=key, data=data, default={"view": data["init"]}, height="content",
                   on_view_change=lambda: None, on_click_change=lambda: None)
     view = res.get("view") or data["init"]
-    T = float(steps[max(0, np.searchsorted(steps, view["T"], side="right") - 1)])
+    t = _view_t(view)
+    T = float(steps[max(0, np.searchsorted(steps, view["T"] if t is None else t, side="right") - 1)])
     st.session_state["T"], st.session_state["playing"] = T, bool(view["playing"])
     click = res.get("click")
     return T, (int(click) if click is not None else None)

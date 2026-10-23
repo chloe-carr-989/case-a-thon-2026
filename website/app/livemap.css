@@ -30,6 +30,8 @@
 .legend i.dot { width: 9px; height: 9px; border-radius: 50%; }
 .legend i.ring { width: 9px; height: 9px; border-radius: 50%; background: none; border: 2px solid var(--c); }
 .legend i.dash { background: none; height: 0; border-top: 2px dashed var(--c); }
+.legend i.edge { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); border: 2px solid #fff; }
+.legend i.grad { width: 42px; height: 8px; }
 .ctl { position: absolute; right: 10px; bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
 .ctl .btn { width: 32px; height: 32px; padding: 0; font-size: 16px; }
 .tip { position: absolute; display: none; pointer-events: none; transform: translateY(-50%); white-space: nowrap;

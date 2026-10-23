@@ -24,8 +24,12 @@ from common import AREAS, CONDITIONS, manifest  # noqa: E402
 
 C = {"bg": "#0c0f12", "water": "#0b0f14", "land": "#1a1f25", "panel": "#12161b", "line": "#262d36",
      "line2": "#333c47", "fg": "#d6dce4", "dim": "#8a95a3", "faint": "#56606d", "accent": "#49b6dc",
-     "warn": "#e9b44c", "crit": "#e2574c"}
-CAT_COLOR = {"cargo": "#4fb3f0", "tanker": "#f0a94f", "passenger": "#c07be0", "tug_service": "#6fd0c5",
+     "warn": "#e9b44c", "crit": "#e2574c", "lane": "#70a4be", "track": "#2ee87a"}
+# map layers answer separate questions, so each gets its own hue: lanes slate blue (where ships usually go),
+# density the only cyan (how much traffic), ships off-white / amber (where they are now), the selected
+# vessel's track emerald so it never reads as density or a vessel type
+DENSITY_SCALE = ["#102f3a", "#164555", "#1d6075", "#247e99", "#2a9fbe", "#43bfdc", "#85e5f5"]
+CAT_COLOR = {"cargo": "#c9d4e0", "tanker": "#f0ad4e", "passenger": "#9b72f2", "tug_service": "#f28cb1",
              "fishing": "#a8d46f", "government": "#f2e66d", "unclassified": "#8a95a3", "other": "#8a95a3"}
 LABEL_COLOR = {"normal": "#5f6b78", "unusual": C["warn"], "high": C["crit"], "no_verdict": C["dim"], "no_data": C["dim"]}
 FOCUS_DEFAULT = ["cargo", "tanker", "passenger", "tug_service", "government", "unclassified", "other"]
@@ -84,6 +88,25 @@ h1, h2, h3, h4 {{letter-spacing: .005em;}}
 .st-key-side_box [data-testid="stMarkdownContainer"] {{margin-bottom: 0 !important;}}
 .st-key-side_box > [class*="_queue"] {{flex: 1 1 0 !important; min-height: 120px;}}
 .st-key-side_box > [class*="_queue"] > div {{height: 100% !important;}}
+/* poisoning test table: four feeds x countermeasure off / on, the active row and column lit */
+.ft {{width: 100%; border-collapse: collapse; font: 13px 'IBM Plex Mono', monospace; color: {C['dim']};
+      font-variant-numeric: tabular-nums; margin: 2px 0 6px;}}
+.ft th {{font-weight: 500; font-size: 12px; text-align: left; padding: 3px 6px; border-bottom: 1px solid {C['line2']};}}
+.ft td {{padding: 3px 6px; border-bottom: 1px solid {C['line']};}}
+.ft td i {{display: inline-block; width: 12px; height: 3px; margin: 0 6px 3px 0;}}
+.ft tr.cur td:first-child {{color: {C['fg']}; font-weight: 600;}}
+.ft td.on {{color: {C['fg']};}} .ft tr.cur td.on {{background: {C['line']}; font-weight: 600;}}
+.st-key-com_demo button {{border-color: {C['warn']}; color: {C['warn']};}}
+/* queue rows are buttons: each opens its vessel */
+[class*="st-key-"][class*="_queue"] {{overflow-y: auto; gap: 0 !important; border-top: 1px solid {C['line']};}}
+.qhead {{font: 500 12px 'IBM Plex Mono', monospace; color: {C['dim']}; white-space: pre; padding: 4px 8px;
+         text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid {C['line']};}}
+[class*="_queue"] button {{width: 100%; justify-content: flex-start; text-align: left; border: 0; border-radius: 0;
+       border-bottom: 1px solid {C['line']}; background: transparent; padding: 5px 8px; min-height: 0; cursor: pointer;}}
+[class*="_queue"] button:hover {{background: {C['line']}; box-shadow: inset 3px 0 0 {C['accent']};}}
+[class*="_queue"] button p {{font: 13px 'IBM Plex Mono', monospace; white-space: pre; overflow: hidden;
+       text-overflow: ellipsis; color: {C['fg']}; margin: 0;}}
+[class*="_queue"] button > div {{width: 100%; overflow: hidden;}}
 @media (max-width: 640px) {{ .block-container {{padding: .5rem 1rem 1rem}} .big {{font-size: 24px}} .brand {{display: none}}
   .st-key-side_box {{height: auto; overflow: visible}} }}
 </style>
@@ -269,7 +292,7 @@ def topbar(modes: dict, evals: dict, current):
 def toolbar(mode: str, layers_default: list[str]):
     """Map toolbar: region and layers, then the data-poisoning test as its own group. Returns
     (area, layers, condition, countermeasure)."""
-    keep("area", "Houston / Galveston")
+    keep("area", "New York / New Jersey")
     keep(f"{mode}_layers", layers_default)
     keep("cond", "nominal")
     keep("mitig", True)
@@ -320,8 +343,32 @@ def zoom_bounds(lat, lon, pad: float = 0.08):
     return (la[m].min() - pad, la[m].max() + pad, lo[m].min() - pad, lo[m].max() + pad)
 
 
+QUEUE_MAX = 80
+
+
+def queue_rows(key: str, widths: list[int], head: list[str], rows: list[list[str]]) -> int | None:
+    """A clickable list: one button per row, columns padded to `widths` characters (last column is free width).
+    Returns the index of the clicked row, or None."""
+    def line(cells):
+        return "  ".join(str(c)[:w].ljust(w) for c, w in zip(cells, widths)) + "  " + str(cells[-1])
+    st.html(f"<div class='qhead'>{esc(line(head))}</div>")
+    hit = None
+    with st.container(key=key):
+        for i, r in enumerate(rows[:QUEUE_MAX]):
+            if st.button(line(r).replace("*", "∗") + "  ›", key=f"{key}_{i}"):
+                hit = i
+    if len(rows) > QUEUE_MAX:
+        st.html(f"<div class='sub'>+{len(rows) - QUEUE_MAX} more: zoom to a region to see them.</div>")
+    return hit
+
+
 def category_chip(cat: str) -> str:
     return f"<span class='chip' style='--c:{CAT_COLOR.get(cat, C['dim'])}'>{esc(CATEGORY_LABEL.get(cat, cat))}</span>"
+
+
+WEATHER_LEGEND = ["wind arrows", C["warn"], ""]
+LANE_LEGEND = ["learned lanes", C["lane"], ""]
+DENSITY_LEGEND = ["traffic density, low → high", f"linear-gradient(90deg, {', '.join(DENSITY_SCALE)})", "grad"]
 
 
 def unavailable(what: str, how: str = "run scripts\\run_pipeline.py --subsets jan01_04 --train-frac 0.75"):

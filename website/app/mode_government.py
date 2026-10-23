@@ -8,6 +8,7 @@ import streamlit as st
 
 import livemap
 import ui
+from aisdp.config import AnomalyConfig
 from aisdp.lanes import CATEGORY_LABEL, lane_group
 from common import CONDITIONS, log_review
 
@@ -24,9 +25,11 @@ LABEL_TEXT = {"normal": "Normal", "unusual": "Unusual", "high": "High deviation"
               "no_data": "No data delivered"}
 
 
-area, layers, cond, mitig = ui.toolbar("gov", ["Sea lanes"])
+area, layers, cond, mitig = ui.toolbar("gov", ["Sea lanes", "Weather"])
 mit = "quality_aware" if mitig else "none"
 W = ui.windows(cond, mit)
+# military and law-enforcement vessels do not move like commercial traffic, so lanes cannot judge them: not scored
+W = W[W.category.astype(str) != "government"]
 steps = np.sort(W["T"].unique())
 cats = sorted(W.category.astype(str).unique(), key=lambda c: list(ui.CAT_COLOR).index(c) if c in ui.CAT_COLOR else 99)
 ui.keep("gov_cats", [c for c in ui.FOCUS_DEFAULT if c in cats])
@@ -39,23 +42,41 @@ alerts = W[inreg & W.label.isin(["unusual", "high"]).to_numpy()]
 def explain(r) -> list[str]:
     g = CATEGORY_LABEL.get(str(lane_group([r.category])[0]), "commercial").lower()
     g = "pooled commercial" if g == "commercial" else g
-    return [REASON[k](r, g) for k in ui.reasons_list(r.reasons)] if isinstance(r.reasons, str) else []
+    keys = ui.reasons_list(r.reasons) if isinstance(r.reasons, str) else []
+    if keys or str(r.label) not in ("unusual", "high"):
+        return [REASON[k](r, g) for k in keys]
+    # flagged with no component past its own 95th percentile: name the ones that lifted the combined score, largest first
+    w = dict(AnomalyConfig().weights)
+    p = {k: float(r[f"p_{k}"]) for k in w if np.isfinite(r[f"p_{k}"]) and r[f"p_{k}"] >= 0.5}
+    top = sorted(p, key=lambda k: np.log(1 - min(p[k], 0.999)) * w[k])[:2]
+    return [f"{REASON[k](r, g)}: more extreme than {p[k]:.0%} of usual {g} windows" for k in top]
 
 
-def weather_line(r, T) -> str:
+def wind_at(lat, lon, T):
+    """Nearest hourly ERA5 point within ~50 km of the vessel, or None."""
     Wx = ui.weather()
-    if Wx is None:
-        return "not available (no weather file loaded)"
+    if Wx is None or not np.isfinite(lat):
+        return None
     w = Wx[Wx.t == np.floor(T / 3600) * 3600]
     if w.empty:
-        return "no observation for this hour"
-    d = np.hypot(w.lat - r.lat, (w.lon - r.lon) * np.cos(np.radians(r.lat)))
-    if d.min() > 0.5:
-        return "no weather point within ~50 km"
-    x = w.iloc[int(np.argmin(d))]
-    tag = ("strong wind: a possible environmental explanation" if x.wind_kn >= 25 else
-           "moderate wind" if x.wind_kn >= 15 else "calm: wind is unlikely to explain a deviation")
-    return f"{x.wind_kn:.0f} kn from {x.wind_dir_deg:.0f}° ({tag}). Context only; it never changes the label."
+        return None
+    d = np.hypot(w.lat - lat, (w.lon - lon) * np.cos(np.radians(lat)))
+    return None if d.min() > 0.5 else w.iloc[int(np.argmin(d))]
+
+
+def weather_check(x) -> tuple[str, str]:
+    """(verdict, colour). The usual reason ships leave their lanes is weather, so an alert is read against it."""
+    if x is None:
+        return "no weather data here", ui.C["dim"]
+    if x.wind_kn >= 25:
+        return "weather may explain this", ui.C["dim"]
+    if x.wind_kn >= 15:
+        return "moderate wind: may partly explain this", ui.C["fg"]
+    return "not explained by weather", ui.C["warn"]
+
+
+def wind_word(x) -> str:
+    return "—" if x is None else "strong" if x.wind_kn >= 25 else "moderate" if x.wind_kn >= 15 else "calm"
 
 
 def dossier(r, T):
@@ -80,14 +101,19 @@ def dossier(r, T):
                     "windows on the calibration days</div>", unsafe_allow_html=True)
     t_why, t_vessel, t_review = st.tabs(["Why", "Data trust", "Review"])
     with t_why:
+        x = wind_at(r.lat, r.lon, T)
+        verdict, col = weather_check(x)
+        st.markdown("<div class='eyebrow'>weather check</div>"
+                    f"<div style='font-size:15px;font-weight:600;color:{col}'>{ui.esc(verdict.capitalize())}</div>"
+                    "<div class='sub' style='margin-bottom:6px'>"
+                    + (ui.esc(f"wind {x.wind_kn:.0f} kn from {x.wind_dir_deg:.0f}° · historical ERA5, a live feed in "
+                              "deployment. ") if x is not None else "")
+                    + "Weather is the most common reason ships leave their lanes. It never changes the score.</div>",
+                    unsafe_allow_html=True)
         why = explain(r)
-        if lab in ("unusual", "high") or why:
+        if why:
             st.markdown("<div class='eyebrow'>why it was flagged</div><ul class='why'>"
-                        + "".join(f"<li>{ui.esc(x)}</li>" for x in why) + "</ul>"
-                        if why else "<div class='sub'>no single factor stands out; the combination is unusual</div>",
-                        unsafe_allow_html=True)
-        st.markdown("<div class='eyebrow' style='margin-top:8px'>weather context</div><div class='sub' "
-                    f"style='margin-bottom:6px'>{ui.esc(weather_line(r, T))}</div>", unsafe_allow_html=True)
+                        + "".join(f"<li>{ui.esc(x)}</li>" for x in why) + "</ul>", unsafe_allow_html=True)
         h = W[(W.mmsi == r.mmsi) & (W["T"] <= T)].sort_values("T")
         if len(h) > 1:
             f = go.Figure(go.Scatter(x=pd.to_datetime(h["T"], unit="s"), y=h.score, mode="lines+markers",
@@ -100,7 +126,6 @@ def dossier(r, T):
                             xaxis=dict(showgrid=False, tickformat="%H:%M", tickfont=dict(size=12)))
             st.markdown("<div class='eyebrow'>score so far (no future data)</div>", unsafe_allow_html=True)
             st.plotly_chart(f, width="stretch", config={"displayModeBar": False}, theme=None, key="gov_hist")
-        st.toggle("Zoom to vessel", value=True, key="gov_zoom")
     with t_vessel:
         st.markdown("<div class='eyebrow'>vessel</div>" + ui.kv([
             ("MMSI", ui.esc(int(r.mmsi))),
@@ -143,32 +168,30 @@ def dossier(r, T):
 
 
 def queue(now, T):
-    st.markdown(f"<div class='eyebrow' style='margin-top:4px'>alert queue · {ui.hhmm(T)} UTC</div>",
+    st.markdown(f"<div class='eyebrow' style='margin-top:4px'>alert queue · {ui.hhmm(T)} UTC · click a row to open</div>",
                 unsafe_allow_html=True)
     q = now[now.label.isin(["unusual", "high"])].sort_values("score", ascending=False)
     if q.empty:
         st.markdown("<div class='sub'>No unusual movement in view at this time.</div>", unsafe_allow_html=True)
     else:
-        tab = pd.DataFrame({"vessel": [ui.name_of(m) for m in q.mmsi],
-                            "type": [CATEGORY_LABEL.get(str(c), c) for c in q.category],
-                            "score": q.score.round(0).astype(int),
-                            "why": [", ".join(x.replace("_", " ") for x in ui.reasons_list(s)) or "combined"
-                                    for s in q.reasons]})
-        ev = st.dataframe(tab, hide_index=True, width="stretch", height="stretch", on_select="rerun",
-                          selection_mode="single-row", key="gov_queue",
-                          column_config={"score": st.column_config.ProgressColumn(
-                              "score", min_value=0, max_value=100, format="%d")})
-        rows = ev.selection.rows if ev is not None else []
-        if rows:
-            st.session_state["gov_sel"] = int(q.mmsi.iloc[rows[0]])
+        wind = [wind_word(wind_at(la, lo, T)) for la, lo in zip(q.lat, q.lon)]
+        hit = ui.queue_rows("gov_queue", [18, 5, 8], ["vessel", "score", "wind", "why"], [
+            [ui.name_of(m), f"{s:.0f}", w, ", ".join(x.replace("_", " ") for x in ui.reasons_list(r)) or "combined"]
+            for m, s, w, r in zip(q.mmsi, q.score, wind, q.reasons)])
+        if hit is not None:
+            st.session_state["gov_sel"] = int(q.mmsi.iloc[hit])
             livemap.command(playing=False)
             st.rerun()
+        windy = sum(w == "strong" for w in wind)
+        st.markdown(f"<div class='sub'>{len(q) - windy} of {len(q)} alerts in calm or moderate wind. Many vessels "
+                    "veering together in strong wind is almost always weather.</div>", unsafe_allow_html=True)
     held = now[now.label.isin(["no_verdict", "no_data"])]
     if len(held):
         st.markdown(f"<div class='sub'>{len(held)} vessels with no verdict: newest report over 20 min old "
                     "(grey rings on the map).</div>", unsafe_allow_html=True)
     st.markdown("<div class='note'>Score = how unusual the last hour of movement is vs. past traffic on these "
-                "lanes (97.5+ flagged). A review prompt, not proof of intent.</div>", unsafe_allow_html=True)
+                "lanes (97.5+ flagged). A review prompt, not proof of intent. Military and law-enforcement vessels "
+                "are not scored: they do not follow commercial routes.</div>", unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------------------------------- live map + panel
@@ -181,7 +204,9 @@ MK = livemap.markers(mk_rows, mk_rows.label.astype(str).map(MK_STYLE),
 LEGEND = ([[CATEGORY_LABEL.get(c, c), ui.CAT_COLOR.get(c, ui.C["dim"]), ""] for c in focus]
           + [["unusual", ui.C["warn"], "dot"], ["high deviation", ui.C["crit"], "dot"],
              ["no verdict (old data)", ui.C["dim"], "ring"]]
-          + ([["learned lanes", ui.C["accent"], ""]] if "Sea lanes" in layers else []))
+          + ([ui.LANE_LEGEND] if "Sea lanes" in layers else [])
+          + ([ui.DENSITY_LEGEND] if "Density" in layers else [])
+          + ([ui.WEATHER_LEGEND] if "Weather" in layers else []))
 VERSION = f"gov|{area}|{cond}|{mit}|{','.join(focus)}|{','.join(layers)}"
 
 
@@ -196,18 +221,17 @@ def live():
     if S is not None:
         trk = ui.track(int(S.mmsi), T_prev - 3 * 3600, T_prev)
         w0 = trk[trk.t > T_prev - 3600]
-        paths = [livemap.path(trk.lat, trk.lon, ui.C["accent"], 1.5, alpha=0.45),
-                 livemap.path(w0.lat, w0.lon, ui.C["accent"], 3)]
+        paths = [livemap.path(trk.lat, trk.lon, ui.C["track"], 1.5, alpha=0.45),
+                 livemap.path(w0.lat, w0.lon, ui.C["track"], 3)]
         if len(w0) >= 2:
             p = ui.lanes().path(w0.lat.iloc[0], w0.lon.iloc[0], w0.lat.iloc[-1], w0.lon.iloc[-1])
             paths.append(livemap.path(p.lat, p.lon, ui.C["fg"], 2, dash=True, alpha=0.85))
         overlay = {"mmsi": int(S.mmsi), "lat": float(S.lat), "lon": float(S.lon), "paths": paths, "points": [],
                    "c": ui.LABEL_COLOR.get(str(S.label), ui.C["fg"])}
-        b = ui.zoom_bounds(np.r_[trk.lat, S.lat], np.r_[trk.lon, S.lon], 0.06) \
-            if st.session_state.get("gov_zoom", True) else None
+        b = ui.zoom_bounds(np.r_[trk.lat, S.lat], np.r_[trk.lon, S.lon], 0.06)
         if b is not None:
             fit = (b[2], b[0], b[3], b[1])
-        LEGEND_SEL = [["track, last 60 min", ui.C["accent"], ""], ["expected route along lanes", ui.C["fg"], "dash"]]
+        LEGEND_SEL = [["track, last 60 min", ui.C["track"], ""], ["expected route along lanes", ui.C["fg"], "dash"]]
     else:
         LEGEND_SEL = []
     grp = str(lane_group([S.category])[0]) if S is not None else "commercial"

@@ -12,12 +12,15 @@ const MONO = '"IBM Plex Mono", ui-monospace, Menlo, monospace';
 const BASEMAP = "https://cdn.plot.ly/un/world_50m.json";   // the same Natural Earth 1:50m file Plotly maps use
 const mx = (lon) => lon * D2R;
 const my = (lat) => Math.log(Math.tan(Math.PI / 4 + Math.max(-85, Math.min(85, lat)) * D2R / 2));
-const SPEED = 1200;         // simulated seconds per real second
+const SPEED = 600;          // simulated seconds per real second
 const TRAIL_H = 3;          // hours of trail behind each vessel
 const FINE_SPAN = 6;        // degrees of longitude across the view below which detail tiles replace the overview
 const PREFETCH = 0.4;       // tiles are fetched for the view plus this fraction of its width on every side
 const MAX_TILES = 200;      // loaded tiles kept in memory per layer; the least recently wanted go first
 const FETCHES = 6;          // tile requests in flight at once
+const WX_MIN = 12;          // wind points on screen below which arrows are interpolated onto a screen grid instead
+const WX_STEP = 128;        // max px between interpolated wind arrows before the grid doubles in density
+const WX_RADIUS = 1.5;      // degrees around an interpolated arrow that wind points are drawn from
 let basemapPromise = null;
 
 export default function (c) {
@@ -205,7 +208,7 @@ function create(parent, d0) {
     A.W = r.width; A.H = r.height;
     for (const c of [cv, base]) { c.width = Math.round(A.W * A.dpr); c.height = Math.round(A.H * A.dpr); }
     strip.width = Math.round(strip.clientWidth * A.dpr); strip.height = Math.round(strip.clientHeight * A.dpr);
-    if (!A.view && A.d) { A.fitKey = A.d.fit.key; fit(A.d.fit.box); }
+    if (!A.view && A.d) { A.fitKey = A.d.fit.key; A.fitArea = A.d.fit.area; fit(A.d.fit.box); }
     A.baseDirty = A.dirty = true;
   }).observe(root);
 
@@ -214,12 +217,17 @@ function create(parent, d0) {
     A.d = d;
     if (d.cmd && d.cmd.id !== A.cmdId) {                       // one-off commands from Python (e.g. pause)
       A.cmdId = d.cmd.id;
+      if (d.cmd.T !== undefined) { jump(d.cmd.T); emit(); }
       if (d.cmd.playing !== undefined && d.cmd.playing !== A.playing) setPlaying(d.cmd.playing);
     }
     if (d.v !== A.v) { A.v = d.v; prepare(d); A.baseDirty = true; }
     if (d.trails !== A.trUrl) { A.trUrl = d.trails; loadTrails(d.trails); }
     if ((d.lanes?.url ?? null) !== A.lnUrl) { A.lnUrl = d.lanes?.url ?? null; loadLanes(A.lnUrl); }
-    if (A.W && (d.fit.key !== A.fitKey || !A.view)) { A.fitKey = d.fit.key; fit(d.fit.box); }
+    if (A.W && (d.fit.key !== A.fitKey || !A.view)) {
+      const cleared = A.view && !d.sel && d.fit.area === A.fitArea;   // closing a vessel keeps the current zoom
+      A.fitKey = d.fit.key; A.fitArea = d.fit.area;
+      if (!cleared) fit(d.fit.box);
+    }
     if (A.t < d.steps[0] || A.t > d.steps.at(-1)) A.t = d.steps[0];
     A.sel = d.sel ? {
       ...d.sel,
@@ -361,10 +369,10 @@ function create(parent, d0) {
     if (A.dens) {
       const s = Math.max(2, A.dens.d * D2R * A.view.k);
       const lerp = (a, b, f) => a.map((v, i) => Math.round(v + (b[i] - v) * f));
-      const cs = [[18, 48, 59], [31, 111, 139], [159, 227, 245]];
-      g.globalAlpha = 0.55;
+      const cs = A.dens.scale.map((h) => [1, 3, 5].map((j) => parseInt(h.slice(j, j + 2), 16))), n = cs.length - 1;
+      g.globalAlpha = 0.6;
       A.dens.xy.forEach(([x0, y0], i) => {
-        const v = A.dens.v[i], c = v < 0.5 ? lerp(cs[0], cs[1], v * 2) : lerp(cs[1], cs[2], v * 2 - 1);
+        const f = A.dens.v[i] * n, k = Math.min(n - 1, Math.floor(f)), c = lerp(cs[k], cs[k + 1], f - k);
         const [x, y] = toScreen(x0, y0);
         g.fillStyle = `rgb(${c})`; g.fillRect(x - s / 2, y - s / 2, s, s);
       });
@@ -403,17 +411,41 @@ function create(parent, d0) {
     g.lineCap = "round"; g.lineJoin = "round";
     A.hits = []; A.heads = new Map();
     if (A.wx) {                                                // wind arrows for the hour containing t
-      const h = Math.floor(t / 3600) * 3600;
-      A.wx.t.forEach((wt, i) => {
-        if (wt !== h) return;
-        const [x, y] = toScreen(...A.wx.xy[i]), kn = A.wx.kn[i], a = (A.wx.dir[i] + 180) * D2R, L = 8 + Math.min(kn, 35) * 0.5;
+      const h = Math.floor(t / 3600) * 3600, pts = [];
+      A.wx.t.forEach((wt, i) => { if (wt === h) pts.push(i); });
+      const arrow = (x, y, kn, dir, note) => {
+        const a = (dir + 180) * D2R, L = 8 + Math.min(kn, 35) * 0.5;
         g.strokeStyle = kn >= 25 ? C.warn : kn >= 15 ? C.fg : C.faint; g.lineWidth = 1.5;
         const ex = x + Math.sin(a) * L, ey = y - Math.cos(a) * L;
         g.beginPath(); g.moveTo(x, y); g.lineTo(ex, ey);
         g.lineTo(ex - Math.sin(a - 0.5) * 5, ey + Math.cos(a - 0.5) * 5); g.moveTo(ex, ey);
         g.lineTo(ex - Math.sin(a + 0.5) * 5, ey + Math.cos(a + 0.5) * 5); g.stroke();
-        A.hits.push({ x, y, text: `wind ${kn.toFixed(0)} kn from ${A.wx.dir[i].toFixed(0)}°` });
+        A.hits.push({ x, y, text: `wind ${kn.toFixed(0)} kn from ${dir.toFixed(0)}° · ${note}historical (ERA5)` });
+      };
+      const xy = pts.map((i) => toScreen(...A.wx.xy[i]));
+      const seen = xy.filter(([x, y]) => x >= 0 && x <= A.W && y >= 0 && y <= A.H).length;
+      if (seen >= WX_MIN) pts.forEach((i, j) => {              // a checkerboard of the 0.5° grid: half the points
+        if ((Math.round(A.wx.lat[i] * 2) + Math.round(A.wx.lon[i] * 2)) % 2 === 0) arrow(...xy[j], A.wx.kn[i], A.wx.dir[i], "");
       });
+      else {                                                   // zoomed in past the 0.5° grid: arrows on a finer
+        const R = WX_RADIUS * D2R * A.view.k;                  // lat/lon grid pinned to the map, inverse-distance
+        let s = 0.5;                                           // weighted from nearby points. The spacing halves
+        while (s * D2R * A.view.k > WX_STEP) s /= 2;           // as you zoom, so existing arrows stay put
+        const unY = (y) => (2 * Math.atan(Math.exp(y)) - Math.PI / 2) / D2R;
+        const lon0 = (A.view.cx - A.W / 2 / A.view.k) / D2R, lon1 = (A.view.cx + A.W / 2 / A.view.k) / D2R;
+        const lat0 = unY(A.view.cy - A.H / 2 / A.view.k), lat1 = unY(A.view.cy + A.H / 2 / A.view.k);
+        for (let la = Math.floor(lat0 / s) * s; la <= lat1 + s; la += s) for (let lo = Math.floor(lon0 / s) * s; lo <= lon1 + s; lo += s) {
+          const [x, y] = toScreen(mx(lo), my(la));
+          let w = 0, kn = 0, u = 0, v = 0;
+          pts.forEach((i, j) => {
+            const dd = (xy[j][0] - x) ** 2 + (xy[j][1] - y) ** 2;
+            if (dd > R * R) return;
+            const f = 1 / Math.max(dd, 1), a = A.wx.dir[i] * D2R;
+            w += f; kn += f * A.wx.kn[i]; u += f * Math.sin(a); v += f * Math.cos(a);
+          });
+          if (w) arrow(x, y, kn / w, (Math.atan2(u, v) / D2R + 360) % 360, "interpolated · ");
+        }
+      }
     }
     // trails: faint over the trail length, solid for the last 90 min, head interpolated between fixes. Zoomed in,
     // each loaded 5-min tile replaces the overview inside it; a vessel crossing tiles keeps its most recent head.
@@ -453,7 +485,8 @@ function create(parent, d0) {
       for (const { r, hx, hy, live, col } of cand.values()) {
         const [x, y] = toScreen(hx, hy);
         A.heads.set(r.m, [x, y]);
-        g.globalAlpha = (live ? 1 : 0.45) * fade; g.fillStyle = col;
+        if (A.sel && r.m !== A.sel.mmsi) continue;               // a vessel is selected: other dots hidden
+        g.globalAlpha = live ? 1 : 0.45; g.fillStyle = col;
         g.beginPath(); g.arc(x, y, 2.6, 0, 7); g.fill();
         A.hits.push({ x, y, mmsi: r.m, click: d.clickHeads, text: `${r.name} · ${d.catLabel[r.cat] || r.cat}` });
       }
@@ -463,8 +496,8 @@ function create(parent, d0) {
     const T = stepOf(t), rows = A.mk.get(T) || [];
     for (const i of rows) {
       const st = d.mk.styles[d.mk.s[i]], m = d.mk.mmsi[i];
+      if (A.sel && m !== A.sel.mmsi) continue;
       const [x, y] = A.heads.get(m) || toScreen(...A.mkxy[i]);
-      g.globalAlpha = d.sel ? 0.35 : 1;
       g.beginPath(); g.arc(x, y, st.r, 0, 7);
       if (st.ring) { g.strokeStyle = st.c; g.lineWidth = 1.6; g.stroke(); }
       else { g.fillStyle = st.c; g.fill(); g.strokeStyle = st.edge || C.bg; g.lineWidth = 1.5; g.stroke(); }

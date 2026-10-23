@@ -3,6 +3,7 @@ import time
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 import livemap
@@ -18,7 +19,7 @@ HELD = {"defer_quality": "held: newest report too old or an implausible jump",
         "abstain_low_score": "held: no destination stood out",
         "abstain_no_zone_in_reach": "held: no known stop area within reach"}
 
-area, layers, cond, mitig = ui.toolbar("com", ["Sea lanes"])
+area, layers, cond, mitig = ui.toolbar("com", ["Sea lanes", "Weather"])
 tag = "mi" if mitig else "un"
 E = E0[E0.condition == cond].copy()
 E["category"] = [ui.category_of(v) for v in E.vessel_type]
@@ -37,6 +38,38 @@ steps = np.sort(ui.windows("nominal", "quality_aware")["T"].unique()) if ui.avai
 trail_cats = [c for c in ui.CAT_COLOR if c in groups or ("other" in groups and c not in ("cargo", "tanker"))]
 
 
+FEED_COLOR = {"nominal": ui.C["fg"], "stale": ui.C["warn"], "low_quality": ui.C["crit"], "combined": "#c07be0"}
+
+
+def miss_min(x: pd.DataFrame, t: str) -> pd.Series:
+    """Minutes each issued ETA was off the actual arrival (+ late, - early); held ETAs are left out."""
+    ok = x[f"{t}_eta_answered"].astype(bool)
+    return ((x.decision_t + x[f"{t}_eta_h"] * 3600 - x.arrival_t) / 60)[ok]
+
+
+@st.cache_data
+def demo_case() -> dict | None:
+    """The poisoning example the demo opens: a cargo/tanker trip whose ETAs are good on the clean feed and go wrong on
+    degraded feeds, where the countermeasure helps most. Picked from the results by this rule, not hand-made."""
+    d = E0[E0.vessel_type.between(70, 89)]
+    best, score = None, 0.0
+    for (m, a), x in d.groupby(["mmsi", "arrival_t"]):
+        c = {k: g for k, g in x.groupby("condition")}
+        if len(c.get("nominal", [])) < 6 or miss_min(c["nominal"], "un").abs().mean() > 20:
+            continue
+        s = sum(miss_min(c[k], "un").abs().mean() - miss_min(c[k], "mi").abs().mean()
+                for k in ("stale", "low_quality", "combined") if k in c)
+        if s > score:
+            best, score = c, s
+    if best is None:
+        return None
+    lq = best["low_quality"]                         # open on the update the countermeasure fixes most
+    gain = miss_min(lq, "un").abs() - miss_min(lq, "mi").abs().reindex(lq.index)
+    r = lq.loc[gain.idxmax()]
+    return {"mmsi": int(r.mmsi), "step": float(np.ceil(r.decision_t / 1800) * 1800),
+            "grp": "tanker" if 80 <= r.vessel_type <= 89 else "cargo", "lat": float(r.in_lat), "lon": float(r.in_lon)}
+
+
 def zone_name(z) -> str:
     if not isinstance(z, str) or z not in Z.index:
         return "—"
@@ -45,6 +78,65 @@ def zone_name(z) -> str:
 
 
 # ------------------------------------------------------------------------------------------- side panel
+def feed_test(r):
+    """The poisoning test for one trip: the ETAs issued under each of the four feeds, as lines over time, with the
+    countermeasure as set in the toolbar. Same ship, same frozen model, same moments: only the feed differs."""
+    trip = E0[(E0.mmsi == r.mmsi) & (E0.arrival_t == r.arrival_t)].sort_values("decision_t")
+    clock = lambda x, t: pd.to_datetime(x.decision_t + x[f"{t}_eta_h"] * 3600, unit="s")
+    arr = pd.to_datetime(r.arrival_t, unit="s")
+    # fixed range over both countermeasure settings, so flipping the toggle moves the lines, not the axes
+    vals = pd.concat([clock(trip, "un"), clock(trip, "mi")]).dropna()
+    lo, hi = min(vals.min(), arr), max(vals.max(), arr)
+    pad = (hi - lo) * 0.08 + pd.Timedelta(minutes=10)
+    held_y = lo - pad
+    x0, x1 = pd.to_datetime(trip.decision_t.min(), unit="s"), pd.to_datetime(trip.decision_t.max(), unit="s")
+    f = go.Figure()
+    f.add_scatter(x=[x0, x1], y=[arr, arr], mode="lines", name=f"actual stop {ui.hhmm(r.arrival_t)}",
+                  line=dict(color=ui.C["track"], width=2, dash="dash"), hoverinfo="skip")
+    for i, (c, lab) in enumerate(CONDITIONS.items()):
+        x = trip[trip.condition == c]
+        ok, on = x[f"{tag}_eta_answered"].astype(bool), c == cond
+        t = pd.to_datetime(x.decision_t, unit="s")
+        f.add_scatter(x=t, y=clock(x, tag).where(ok), mode="lines+markers", name=lab, connectgaps=False,
+                      opacity=1 if on else 0.5, line=dict(color=FEED_COLOR[c], width=3.5 if on else 1.5),
+                      marker=dict(size=8 if on else 5), hovertemplate=f"{lab}<br>issued %{{x|%H:%M}} · ETA "
+                                                                       "%{y|%H:%M}<extra></extra>")
+        if (~ok).any():                              # held ETAs sit on their own row under the chart
+            f.add_scatter(x=t[~ok], y=[held_y - pad * 0.22 * i] * int((~ok).sum()), mode="markers", showlegend=False,
+                          opacity=1 if on else 0.5, marker=dict(symbol="circle-open", size=10 if on else 8,
+                                                                color=FEED_COLOR[c], line=dict(width=2)),
+                          hovertemplate=f"{lab}<br>issued %{{x|%H:%M}} · held, sent to the scheduler<extra></extra>")
+    f.add_shape(type="line", x0=pd.to_datetime(r.decision_t, unit="s"), x1=pd.to_datetime(r.decision_t, unit="s"),
+                y0=0, y1=1, yref="paper", line=dict(color=ui.C["dim"], width=1, dash="dot"))
+    if (~trip.mi_eta_answered.astype(bool)).any() or (~trip.un_eta_answered.astype(bool)).any():
+        f.add_annotation(x=1, xref="paper", y=held_y - pad * 0.33, text="held", showarrow=False, xanchor="left",
+                         font=dict(size=12, color=ui.C["dim"]))
+    f.update_layout(height=270, margin=dict(l=0, r=34, t=4, b=0), paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)", font=dict(size=12, color=ui.C["fg"]),
+                    legend=dict(orientation="h", y=-0.16, x=0, font=dict(size=12)),
+                    xaxis=dict(tickformat="%H:%M", gridcolor=ui.C["line"], title=dict(text="ETA issued at", font=dict(size=12))),
+                    yaxis=dict(tickformat="%H:%M", gridcolor=ui.C["line"], range=[held_y - pad * 0.9, hi + pad * 0.4],
+                               title=dict(text="predicted arrival", font=dict(size=12))))
+    st.markdown(f"<div class='eyebrow'>ETA under each feed · countermeasure {'ON' if mitig else 'OFF'}</div>",
+                unsafe_allow_html=True)
+    st.plotly_chart(f, width="stretch", config={"displayModeBar": False}, theme=None, key="com_feeds")
+
+    def cell(x, t):
+        m, held = miss_min(x, t).abs(), int((~x[f"{t}_eta_answered"].astype(bool)).sum())
+        s = f"{m.mean():.0f} / {m.max():.0f}" if len(m) else "—"
+        return s + (f" <span style='color:{ui.C['dim']}'>· {held} held</span>" if held else "")
+    rows = "".join(
+        f"<tr{' class=cur' if c == cond else ''}><td><i style='background:{FEED_COLOR[c]}'></i>{ui.esc(lab)}</td>"
+        f"<td{' class=on' if not mitig else ''}>{cell(trip[trip.condition == c], 'un')}</td>"
+        f"<td{' class=on' if mitig else ''}>{cell(trip[trip.condition == c], 'mi')}</td></tr>"
+        for c, lab in CONDITIONS.items())
+    st.markdown(f"<table class='ft'><tr><th>minutes off (avg / worst)</th><th>countermeasure off</th>"
+                f"<th>on</th></tr>{rows}</table>", unsafe_allow_html=True)
+    st.markdown("<div class='note'>Same ship, same frozen model, same moments: only the feed differs. Stale and "
+                "unreliable feeds are SIMULATED faults on the real AIS. Hollow circles = ETA held and sent to the "
+                "scheduler instead of issued. Dotted line = now.</div>", unsafe_allow_html=True)
+
+
 def dossier(r, T):
     h1, h2 = st.columns([3, 1], vertical_alignment="top")
     h1.markdown(f"<div class='eyebrow'>selected vessel</div><h3 style='margin:0'>{ui.esc(ui.name_of(r.mmsi))}</h3>"
@@ -61,7 +153,10 @@ def dossier(r, T):
         st.markdown(f"<div class='big'>—<small>no ETA</small></div><div class='sub'>"
                     f"{ui.esc(HELD.get(r.mi_action, 'held: no destination'))}. Sent to the scheduler to review "
                     "instead of guessing.</div>", unsafe_allow_html=True)
-    t_pred, t_data, t_arr, t_review = st.tabs(["Prediction", "Data trust", "Arrivals here", "Review"])
+    t_feed, t_pred, t_data, t_arr, t_review = st.tabs(["Poisoning test", "Prediction", "Data trust", "Arrivals here",
+                                                       "Review"])
+    with t_feed:
+        feed_test(r)
     with t_pred:
         st.markdown(ui.kv([
             ("Stops at", ui.esc(zone_name(r.zone)) + " <span style='color:#8a95a3'>(predicted stop area)</span>"),
@@ -70,15 +165,14 @@ def dossier(r, T):
             ("Baseline ETA", ui.esc(ui.dur(r.bl_eta_h)) + " <span style='color:#8a95a3'>(distance ÷ speed)</span>"),
             ("Issued", ui.esc(ui.stamp(r.decision_t))),
         ]), unsafe_allow_html=True)
-        with st.expander("What actually happened (never shown to the model)"):
-            err = (r.eta_h - r.true_eta_h) * 60 if r.ok else np.nan
-            st.markdown(ui.kv([("Stopped at", ui.esc(ui.stamp(r.arrival_t))),
-                               ("Stop area", ui.esc(zone_name(r.true_zone)) + (" ✓" if r.zone == r.true_zone else "")),
-                               ("ETA error", ui.esc(f"{err:+.0f} min" if np.isfinite(err) else "—"))]),
-                        unsafe_allow_html=True)
-            st.caption("Arrival = the vessel's next stop of 30+ min, seen in later AIS reports. Not a verified berth "
-                       "call or unloading time.")
-        st.toggle("Zoom to vessel", value=True, key="com_zoom")
+        err = (r.eta_h - r.true_eta_h) * 60 if r.ok else np.nan
+        st.markdown("<div class='eyebrow'>what actually happened (never shown to the model)</div>"
+                    + ui.kv([("Stopped at", ui.esc(ui.stamp(r.arrival_t))),
+                             ("Stop area", ui.esc(zone_name(r.true_zone)) + (" ✓" if r.zone == r.true_zone else "")),
+                             ("ETA error", ui.esc(f"{err:+.0f} min" if np.isfinite(err) else "—"))]),
+                    unsafe_allow_html=True)
+        st.caption("Arrival = the vessel's next stop of 30+ min, seen in later AIS reports. Not a verified berth "
+                   "call or unloading time.")
     with t_data:
         sim = r.source != "AIS-original" or r.is_stale
         st.markdown(ui.kv([
@@ -135,26 +229,33 @@ def dossier(r, T):
 
 
 def queue(now, T):
-    st.markdown(f"<div class='eyebrow' style='margin-top:4px'>inbound vessels · ETAs issued by {ui.hhmm(T)} UTC</div>",
+    D = demo_case()
+    if D is not None and st.button(f"▶ Poisoning test: {ui.name_of(D['mmsi'])}, ETA under four feeds",
+                                   key="com_demo", width="stretch",
+                                   help="Opens one cargo ship on the unreliable feed with the countermeasure off. "
+                                        "Then flip the countermeasure and the feeds."):
+        area = next((a for a, b in ui.AREAS.items() if b and ui.in_box([D["lat"]], [D["lon"]], a)[0]), "Whole U.S.")
+        st.session_state.update(area=area, cond="low_quality", mitig=False, com_sel=D["mmsi"],
+                                com_groups=sorted(set(st.session_state["com_groups"] or []) | {D["grp"]}))
+        livemap.command(playing=False, T=steps[min(np.searchsorted(steps, D["step"]), len(steps) - 1)])
+        st.rerun()
+    st.markdown(f"<div class='eyebrow' style='margin-top:4px'>inbound vessels · ETAs issued by {ui.hhmm(T)} UTC · click a row to open</div>",
                 unsafe_allow_html=True)
     q = pd.concat([now[now.ok].sort_values("eta_t"), now[~now.ok]])
     if q.empty:
         st.markdown("<div class='sub'>No ETAs issued in view at this time. Try another region or time."
                     "</div>", unsafe_allow_html=True)
     else:
-        tab = pd.DataFrame({"vessel": [ui.name_of(m) for m in q.mmsi],
-                            "type": [GROUPS.get(g, g) for g in q.grp],
-                            "ETA": [ui.hhmm(t) if ok else "held" for t, ok in zip(q.eta_t, q.ok)],
-                            "in": [ui.dur(h) if ok else "review" for h, ok in zip(q.eta_h, q.ok)]})
-        ev = st.dataframe(tab, hide_index=True, width="stretch", height="stretch", on_select="rerun",
-                          selection_mode="single-row", key="com_queue")
-        rows = ev.selection.rows if ev is not None else []
-        if rows:
-            st.session_state["com_sel"] = int(q.mmsi.iloc[rows[0]])
+        hit = ui.queue_rows("com_queue", [18, 7, 5], ["vessel", "type", "ETA", "in"], [
+            [ui.name_of(m), {"other": "Other"}.get(g, GROUPS.get(g, g)), ui.hhmm(t) if ok else "held",
+             ui.dur(h) if ok else "review"] for m, g, t, h, ok in zip(q.mmsi, q.grp, q.eta_t, q.eta_h, q.ok)])
+        if hit is not None:
+            st.session_state["com_sel"] = int(q.mmsi.iloc[hit])
             livemap.command(playing=False)
             st.rerun()
     st.markdown("<div class='note'>ETA = time to the vessel's next 30+ min stop, routed on learned sea lanes. "
-                "<b>held</b> = data too poor.</div>", unsafe_allow_html=True)
+                "<b>held</b> = data too poor. Why it matters: just-in-time supply chains plan production around "
+                "arrivals, margins are thin, and an idle ship or berth earns nothing.</div>", unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------------------------------- live map + panel
@@ -162,13 +263,15 @@ STYLE_KEYS = [(g, ok) for g in GROUPS for ok in (True, False)]
 mk_rows = view[view.step.isin(steps)]
 MK = livemap.markers(mk_rows.assign(T=mk_rows.step),
                      [STYLE_KEYS.index((g, bool(ok))) for g, ok in zip(mk_rows.grp, mk_rows.ok)],
-                     [{"c": ui.CAT_COLOR.get(g, ui.C["dim"]), "r": 6 if ok else 5, "ring": not ok, "edge": ui.C["fg"]}
+                     [{"c": ui.CAT_COLOR.get(g, ui.C["dim"]) if ok else "#ffffff", "r": 6, "ring": not ok, "edge": "#ffffff"}
                       for g, ok in STYLE_KEYS],
                      [f"{ui.name_of(m)} · " + (f"ETA {ui.hhmm(t)} ({ui.dur(h)})" if ok else "ETA held for review")
                       for m, t, h, ok in zip(mk_rows.mmsi, mk_rows.eta_t, mk_rows.eta_h, mk_rows.ok)])
 LEGEND = ([[CATEGORY_LABEL.get(c, c), ui.CAT_COLOR.get(c, ui.C["dim"]), ""] for c in trail_cats]
-          + [["ETA issued (white edge)", ui.C["fg"], "dot"], ["ETA held for review", ui.C["dim"], "ring"]]
-          + ([["learned lanes", ui.C["accent"], ""]] if "Sea lanes" in layers else []))
+          + [["ETA issued (white edge)", ui.C["fg"], "edge"], ["ETA held for review (hollow)", "#ffffff", "ring"]]
+          + ([ui.LANE_LEGEND] if "Sea lanes" in layers else [])
+          + ([ui.DENSITY_LEGEND] if "Density" in layers else [])
+          + ([ui.WEATHER_LEGEND] if "Weather" in layers else []))
 VERSION = f"com|{area}|{cond}|{mitig}|{','.join(groups)}|{','.join(layers)}"
 
 
@@ -178,7 +281,8 @@ def live():
     T_prev = livemap.current_step("com_map", steps)
     now = view[view.step == T_prev]
     sel = st.session_state.get("com_sel")
-    S = now[now.mmsi == sel].iloc[0] if sel is not None and (now.mmsi == sel).any() else None
+    picked = E[(E.step == T_prev) & (E.mmsi == sel)]        # a picked vessel stays open outside the region box
+    S = picked.iloc[0] if sel is not None and len(picked) else None
     overlay, fit, legend_sel = None, ui.AREAS.get(area) or livemap.US_BOX, []
     if S is not None:
         trk = ui.track(int(S.mmsi), S.decision_t - 2 * 3600, S.decision_t)
@@ -188,15 +292,14 @@ def live():
             route = ui.lanes().path(S.lat, S.lon, Z.at[S.zone, "lat"], Z.at[S.zone, "lon"])
             points = [{"lat": float(Z.at[S.zone, "lat"]), "lon": float(Z.at[S.zone, "lon"]), "c": ui.C["fg"],
                        "text": f"ETA {ui.hhmm(S.eta_t)}" if S.ok else "stop area"}]
-        overlay = {"mmsi": int(S.mmsi), "lat": float(S.lat), "lon": float(S.lon), "c": ui.C["accent"],
-                   "paths": [livemap.path(trk.lat, trk.lon, ui.C["accent"], 3),
+        overlay = {"mmsi": int(S.mmsi), "lat": float(S.lat), "lon": float(S.lon), "c": ui.C["track"],
+                   "paths": [livemap.path(trk.lat, trk.lon, ui.C["track"], 3),
                              livemap.path(route.lat, route.lon, ui.C["fg"], 2, dash=True, alpha=0.85)],
                    "points": points}
-        legend_sel = [["track, last 2 h", ui.C["accent"], ""], ["expected route to stop area", ui.C["fg"], "dash"]]
-        if st.session_state.get("com_zoom", True):
-            b = ui.zoom_bounds(np.r_[trk.lat, route.lat, S.lat], np.r_[trk.lon, route.lon, S.lon], 0.06)
-            if b is not None:
-                fit = (b[2], b[0], b[3], b[1])
+        legend_sel = [["track, last 2 h", ui.C["track"], ""], ["expected route to stop area", ui.C["fg"], "dash"]]
+        b = ui.zoom_bounds(np.r_[trk.lat, route.lat, S.lat], np.r_[trk.lon, route.lon, S.lon], 0.06)
+        if b is not None:
+            fit = (b[2], b[0], b[3], b[1])
     with map_col:
         T, hit = livemap.render(
             "com_map", area=area, steps=steps, counts=view[view.ok].groupby("step").size(),
