@@ -177,9 +177,13 @@ function create(parent, d0) {
   };
   cv.onpointerleave = () => { tip.style.display = "none"; };
   const hitTest = (x, y) => {
-    let best = null, bd = 100;                                // 10 px radius; markers listed last win ties
-    for (const h of A.hits) { const d = (h.x - x) ** 2 + (h.y - y) ** 2; if (d <= bd) { bd = d; best = h; } }
-    return best;
+    // clickable vessels: 22 px radius so a near miss still opens one; other tooltips (wind): 10 px. Ties: last wins
+    let best = null, bd = 22 * 22, other = null, od = 100;
+    for (const h of A.hits) {
+      const d = (h.x - x) ** 2 + (h.y - y) ** 2;
+      if (h.click) { if (d <= bd) { bd = d; best = h; } } else if (d <= od) { od = d; other = h; }
+    }
+    return best || other;
   };
 
   // --- strip: one bar per 30-min step, and the scrubber itself (same x scale, so bars and playhead line up)
@@ -491,16 +495,16 @@ function create(parent, d0) {
   const drawStrip = (T) => {
     const g = strip.getContext("2d"), d = A.d, s = d.steps, C = d.colors, w = strip.width / A.dpr, h = strip.height / A.dpr;
     g.setTransform(A.dpr, 0, 0, A.dpr, 0, 0); g.clearRect(0, 0, w, h);
-    const top = 2, base = h - 12, mxc = Math.max(1, ...d.counts), bw = 1800 / span() * w;
+    const top = 2, bot = h - 12, mxc = Math.max(1, ...d.counts), bw = 1800 / span() * w;
     s.forEach((st, i) => {
-      const bh = Math.max(1, (d.counts[i] / mxc) * (base - top));
+      const bh = Math.max(1, (d.counts[i] / mxc) * (bot - top));
       g.fillStyle = st === T ? C.accent : C.line2;
-      g.fillRect(xOf(st) + 0.5, base - bh, Math.max(1, bw - 1), bh);
+      g.fillRect(xOf(st) + 0.5, bot - bh, Math.max(1, bw - 1), bh);
     });
     if (d.degr) {
       g.strokeStyle = C.warn; g.lineWidth = 1.5; g.beginPath();
       s.forEach((st, i) => {
-        const y = base - d.degr[i] * (base - top);
+        const y = bot - d.degr[i] * (bot - top);
         i ? g.lineTo(xOf(st), y) : g.moveTo(xOf(st), y); g.lineTo(xOf(st) + bw, y);
       });
       g.stroke();

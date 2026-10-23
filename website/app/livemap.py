@@ -9,6 +9,7 @@ wherever the view is, so any port can be panned or zoomed to.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 from pathlib import Path
 
@@ -193,17 +194,28 @@ def current_step(key: str, steps: np.ndarray) -> float:
     return float(steps[max(0, np.searchsorted(steps, t, side="right") - 1)])
 
 
-def render(key: str, *, area: str, steps: np.ndarray, counts: pd.Series, mk: dict, cats: list[str],
-           layer_groups: tuple, layers: list[str], hud: list[str], legend: list, sel: dict | None,
-           fit_box, click_heads: bool, version: str) -> tuple[float, int | None]:
-    """Draw the live map. Returns (current 30-min step T, clicked MMSI or None)."""
+def strip_caption(bars: str, degr: bool) -> list[str]:
+    """Timeline legend: what the bar heights count and, on a degraded feed, the amber share line."""
+    out = [f"<i style='--c:{ui.C['line2']}'></i>bar height = {html.escape(bars)} per 30 min (blue = now)"]
+    if degr:
+        out.append(f"<i class='line' style='--c:{ui.C['warn']}'></i>share of reports degraded (simulated, 0-100%)")
+    return out
+
+
+def render(key: str, *, area: str, steps: np.ndarray, counts: pd.Series, bars: str, degr: pd.Series | None,
+           mk: dict, cats: list[str], layer_groups: tuple, layers: list[str], hud: list[str], legend: list,
+           sel: dict | None, fit_box, click_heads: bool, version: str) -> tuple[float, int | None]:
+    """Draw the live map. Returns (current 30-min step T, clicked MMSI or None).
+
+    `counts` per step are the timeline bars, described by `bars`; `degr` is the simulated degraded share per step."""
     st.session_state.setdefault("playing", True)
-    st.session_state.setdefault("trail_h", 3)
     T0 = st.session_state.get("T", float(steps[0]))
     t0, t1 = float(steps[0]) - 6 * 3600, float(steps[-1])
     data = {
         "v": version, "steps": [float(s) for s in steps],
         "counts": counts.reindex(steps).fillna(0).astype(int).tolist(), "trails": trail_url(t0, t1),
+        "degr": None if degr is None else degr.reindex(steps).fillna(0).clip(0, 1).round(3).tolist(),
+        "cap": strip_caption(bars, degr is not None),
         "mk": mk, "cats": cats, "clickHeads": click_heads,
         "lanes": {"url": lane_url(), "groups": list(layer_groups)} if "Sea lanes" in layers else None,
         "density": density(area) if "Density" in layers else None,
@@ -213,7 +225,7 @@ def render(key: str, *, area: str, steps: np.ndarray, counts: pd.Series, mk: dic
         "colors": {k: ui.C[k] for k in ("bg", "water", "land", "line", "line2", "fg", "dim", "faint", "accent",
                                          "warn", "crit")},
         "catColor": ui.CAT_COLOR, "catLabel": CATEGORY_LABEL,
-        "init": {"T": T0, "playing": st.session_state["playing"], "trail_h": st.session_state["trail_h"]},
+        "init": {"T": T0, "playing": st.session_state["playing"]},
         "cmd": st.session_state.get("map_cmd"),
     }
     res = _render(key=key, data=data, default={"view": data["init"]}, height="content",
@@ -221,6 +233,5 @@ def render(key: str, *, area: str, steps: np.ndarray, counts: pd.Series, mk: dic
     view = res.get("view") or data["init"]
     T = float(steps[max(0, np.searchsorted(steps, view["T"], side="right") - 1)])
     st.session_state["T"], st.session_state["playing"] = T, bool(view["playing"])
-    st.session_state["trail_h"] = view.get("trail_h", 3)
     click = res.get("click")
     return T, (int(click) if click is not None else None)

@@ -1,381 +1,445 @@
-"""Baseline vs trained model for all four questions, and which questions show the feed poisoning most clearly."""
+"""Model Performance: baseline vs model, the poisoning experiment (stale, unreliable, combined), the countermeasure,
+human oversight, and the study card, for the two tasks the modes show (Commercial ETA, Government anomalies)."""
+import json
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from common import CONDITIONS, manifest
-from perf import (SCHEDULE, STRESS, TASKS, defect_breakdown, errors, ghost_curve, headline, pick, primary_baseline,
-                  relative_by_window, staleness_curve)
+import ui
+from common import CONDITIONS, LOG, manifest, metrics
 
-st.title("Baseline vs model performance")
-st.caption(f"All four questions on the same feed conditions, held-out cases and reference values. Default run: "
-           f"{manifest().get('default_demo_subset', '?')}; means over seeds {manifest().get('seeds', '')}, "
-           "error bars are the seed standard deviation. Withheld answers are charged a penalty (position, counts) or "
-           "counted as misses (destination), so the countermeasure cannot look better by refusing to answer.")
+STRESS = {"stale": "Stale only", "low_quality": "Unreliable only", "combined": "Both"}
+SCOL = {"nominal": ui.C["dim"], "stale": "#6fd0c5", "low_quality": ui.C["warn"], "combined": ui.C["crit"]}
+OFF, ON, BASE = ui.C["crit"], ui.C["accent"], ui.C["dim"]
+M = manifest()
+RUN_A = M.get("tasks", {}).get("anomaly", {}).get("run", {})
+SPLIT = M.get("split", {}).get("split_t_utc", "")[:16]
+SCHED = M.get("config", {}).get("stale_schedule", [0.1, 0.2, 0.3, 0.45, 0.6])
 
-if all(errors(t).empty for t in TASKS):
-    st.warning("No results yet. Run `.venv\\Scripts\\python scripts\\run_pipeline.py`.")
+
+def style(f: go.Figure, h: int, **kw) -> go.Figure:
+    f.update_layout(height=h, margin=dict(l=0, r=0, t=28, b=0), paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)", font=dict(size=13), legend=dict(orientation="h", y=-0.22), **kw)
+    f.update_xaxes(gridcolor=ui.C["line"], zerolinecolor=ui.C["line2"])
+    f.update_yaxes(gridcolor=ui.C["line"], zerolinecolor=ui.C["line2"])
+    return f
+
+
+def note(text: str):
+    st.markdown(f"<div class='note' style='font-size:13px;margin-bottom:16px'>{text}</div>", unsafe_allow_html=True)
+
+
+def win_labels() -> list[str]:
+    e = RUN_A.get("window_edges_t") or []
+    return [f"{i + 1} · {ui.hhmm(a)}–{ui.hhmm(b)}<br>{s:.0%} degraded" for i, (a, b, s) in
+            enumerate(zip(e[:-1], e[1:], SCHED))] if len(e) > 1 else [str(i + 1) for i in range(5)]
+
+
+# ------------------------------------------------------------------------------------------- data
+@st.cache_data
+def eta(window_level: bool) -> pd.DataFrame:
+    m = metrics("eta")
+    m = m[(m.subgroup == "all") & ((m.window != "all") if window_level else (m.window == "all"))].copy()
+    keys = ["condition", "predictor", "mitigation"] + (["window"] if window_level else [])
+    if window_level:
+        m["window"] = m.window.astype(int)
+    out = m.groupby(keys).mean(numeric_only=True)
+    out["mae_sd"] = m.groupby(keys).mae_h.std()
+    return out.reset_index()
+
+
+@st.cache_data
+def anomaly(window_level: bool) -> pd.DataFrame:
+    m = metrics("anomaly")
+    m = m[(m.window != "all") if window_level else (m.window == "all")].copy()
+    if window_level:
+        m["window"] = m.window.astype(int)
+    return m.groupby(["condition", "mitigation"] + (["window"] if window_level else [])).mean(numeric_only=True) \
+        .reset_index()
+
+
+@st.cache_data
+def age_curves() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """C1: outputs against the age of the newest delivered report (stale feed, no countermeasure, seed 0)."""
+    bins, labs = [-1, 5, 10, 20, 30, 45, 90], ["0-5", "5-10", "10-20", "20-30", "30-45", "45+"]
+    w = pd.read_parquet(ui.RES / "anomaly_windows.parquet", columns=["condition", "mitigation", "label", "age_s"],
+                        filters=[("condition", "==", "stale"), ("mitigation", "==", "none")])
+    w = w[w.label.isin(["normal", "unusual", "high"])]
+    w["age"] = pd.cut(w.age_s / 60, bins, labels=labs)
+    a = w.groupby("age", observed=True).agg(n=("label", "size"),
+                                             alert=("label", lambda x: x.isin(["unusual", "high"]).mean()))
+    d = ui.eta_cases()
+    n = d[d.condition == "nominal"].set_index("case_id")
+    s = d[(d.condition == "stale") & d.un_eta_answered].copy()
+    s["err"] = (s.un_eta_h - s.true_eta_h).abs()
+    s["err0"] = (n.un_eta_h - n.true_eta_h).abs().reindex(s.case_id).to_numpy()
+    s["bl"] = (s.bl_eta_h - s.true_eta_h).abs()
+    s["bl0"] = (n.bl_eta_h - n.true_eta_h).abs().reindex(s.case_id).to_numpy()
+    s["age"] = pd.cut(s.age_s / 60, [-1, 2, 10, 20, 30, 45, 90], labels=["0-2", "2-10", "10-20", "20-30", "30-45", "45+"])
+    e = s.dropna(subset=["err0"]).groupby("age", observed=True).agg(n=("err", "size"), err=("err", "mean"),
+                                                                     err0=("err0", "mean"), bl=("bl", "mean"),
+                                                                     bl0=("bl0", "mean"))
+    return a.reset_index(), e.reset_index()
+
+
+@st.cache_data
+def eta_zone_split() -> dict:
+    d = ui.eta_cases()
+    c = d[(d.condition == "nominal") & d.un_eta_answered]
+    right = (c.un_pred1 == c.true_zone).to_numpy()
+    err = (c.un_eta_h - c.true_eta_h).abs().to_numpy()
+    return {"share": right.mean(), "right": err[right].mean(), "wrong": err[~right].mean(), "n": len(c),
+            "ms_un": float(d.t_un_ms.median()), "ms_mi": float(d.t_mi_ms.median())}
+
+
+def g(df, **kw):
+    for k, v in kw.items():
+        df = df[df[k] == v]
+    return df.iloc[0] if len(df) == 1 else df
+
+
+# ------------------------------------------------------------------------------------------- page
+st.markdown("<h2 style='margin:.2rem 0 0'>Model performance</h2>", unsafe_allow_html=True)
+prof = M.get("dataset", {}).get("profile_observed", {})
+st.markdown(f"<div class='sub' style='font-size:14px'>AIS data {ui.esc(prof.get('time_min', '')[:10])} → "
+            f"{ui.esc(prof.get('time_max', '')[:10])}. Models learned only from reports before <b>{SPLIT} UTC</b>; "
+            "every number here is scored on the following day, which no model saw (the test day). Degraded feeds "
+            "are SIMULATED on that same day, so clean and poisoned runs score identical cases.</div>",
+            unsafe_allow_html=True)
+EA, EW, AA, AW = eta(False), eta(True), anomaly(False), anomaly(True)
+if EA.empty or AA.empty:
+    st.warning("No ETA or anomaly results in results/metrics.csv. Run scripts\\run_pipeline.py --subsets jan01_04.")
     st.stop()
+SYN = metrics("anomaly_synthetic")
+XL = win_labels()
 
-OFF, ON = "#c62828", "#49b6dc"
-BASE_COLORS = ["#616161", "#9e9e9e", "#c8c8c8"]
-LOGY = dict(type="log", tickformat="~g")
+t_base, t_poison, t_fix, t_human, t_card = st.tabs(
+    ["Baseline vs model", "Poisoning: cause → effect", "Countermeasure", "Human oversight", "Study card"])
 
-
-def natural(task, v):
-    """Back to the metric's own orientation for display (destination: accuracy, higher is better)."""
-    return 1 - v if TASKS[task].get("accuracy") else v
-
-
-def stat(E, pred, mit, cond, window="all"):
-    s = pick(E, pred, mit, window)
-    s = s[s.condition == cond]
-    return s.err.mean(), s.err.std(), s.coverage.mean()
-
-
-tab_cmp, tab_pick = st.tabs(["Baseline vs model", "Which questions show the poisoning best?"])
-
-# ===================================================================================== tab 1
-with tab_cmp:
-    underway = st.toggle("Position: underway vessels only (SOG ≥ 2 kn)", value=False,
-                         help="Most vessels are moored, so all-vessel position errors are tiny. "
-                              "The underway subgroup shows movement skill.")
-    sub = {t: ("underway_ge2kn" if underway and t == "position_15m" else "all") for t in TASKS}
-
-    rows = []
-    for t, spec in TASKS.items():
-        E = errors(t, sub[t])
-        if E.empty:
-            continue
-        m, _, _ = stat(E, spec["model"], "none", "nominal")
-        bl = {b: stat(E, b, "none", "nominal")[0] for b in spec["baselines"]}
-        pb = primary_baseline(t)
-        best = min(bl, key=bl.get)
-        rows.append({"question": spec["short"], "metric": spec["label"] if not spec.get("accuracy") else "top-1 accuracy",
-                     "trained model": natural(t, m), f"main baseline": natural(t, bl[pb]), "main baseline is": spec["baselines"][pb],
-                     "model vs main baseline": (1 - m / bl[pb]),
-                     "best baseline": spec["baselines"][best], "model vs best baseline": (1 - m / bl[best])})
-    st.subheader("Clean feed: does the trained model beat a simple comparator?")
-    st.dataframe(pd.DataFrame(rows).style.format({"trained model": "{:.3f}", "main baseline": "{:.3f}",
-                                                  "model vs main baseline": "{:+.1%}", "model vs best baseline": "{:+.1%}"})
-                 .map(lambda v: f"color: {'#2e7d32' if v > 0 else '#c62828'}",
-                      subset=["model vs main baseline", "model vs best baseline"]),
-                 hide_index=True, width="stretch")
-    st.caption("Positive = the model's error is that much lower than the baseline's (for destination, its miss rate). "
-               "The port-occupancy model does not beat persistence on a clean feed.")
-
-    st.subheader("All four feed conditions")
-    fig = make_subplots(rows=2, cols=2, subplot_titles=[s["short"] for s in TASKS.values()],
-                        vertical_spacing=0.16, horizontal_spacing=0.08)
-    shown = set()
-    for i, (t, spec) in enumerate(TASKS.items()):
-        E = errors(t, sub[t])
-        if E.empty:
-            continue
-        r, c = divmod(i, 2)
-        series = [(b, "none", lab, BASE_COLORS[j]) for j, (b, lab) in enumerate(spec["baselines"].items())]
-        series += [(spec["model"], "none", "model, countermeasure off", OFF),
-                   (spec["model"], "quality_aware", "model, countermeasure on", ON)]
-        for pred, mit, lab, col in series:
-            v = [stat(E, pred, mit, cond) for cond in CONDITIONS]
-            legend = lab
-            fig.add_bar(x=list(CONDITIONS.values()), y=[natural(t, a) for a, _, _ in v],
-                        error_y=dict(type="data", array=[s for _, s, _ in v], thickness=1, width=2),
-                        marker_color=col, name=legend, legendgroup=legend, showlegend=legend not in shown,
-                        customdata=[cv for _, _, cv in v],
-                        hovertemplate=f"{lab}<br>%{{y:.3f}}<br>%{{customdata:.0%}} answered<extra></extra>",
-                        row=r + 1, col=c + 1)
-            shown.add(legend)
-        ytitle = "top-1 accuracy (all cases)" if spec.get("accuracy") else spec["label"]
-        fig.update_yaxes(title_text=ytitle, row=r + 1, col=c + 1,
-                         **({} if spec.get("accuracy") else LOGY))
-    fig.update_layout(barmode="group", height=720, margin=dict(t=40, b=10), legend=dict(orientation="h", y=-0.06))
-    st.plotly_chart(fig, width="stretch")
-    st.caption("Error axes are logarithmic because the unreliable source raises some errors 10-30×. "
-               "Count questions share three baselines (persistence, 3-hour rolling mean, training-period mean). The "
-               "training-period mean ignores the live feed, so poisoning cannot affect it. That is why it beats the "
-               "unprotected model under corruption, although it is much worse on a clean feed.")
-
-    st.subheader("Over the test period")
-    cond = st.segmented_control("Feed condition", list(CONDITIONS), format_func=CONDITIONS.get, default="combined",
-                                key="cmp_cond") or "combined"
-    fig = make_subplots(rows=2, cols=2, subplot_titles=[s["short"] for s in TASKS.values()],
-                        vertical_spacing=0.16, horizontal_spacing=0.08)
-    shown = set()
-    xlab = [f"{w}<br>{s:.0%}" for w, s in enumerate(SCHEDULE)]
-    for i, (t, spec) in enumerate(TASKS.items()):
-        E = errors(t, sub[t])
-        if E.empty:
-            continue
-        r, c = divmod(i, 2)
-        series = [(b, "none", lab, BASE_COLORS[j], "dot") for j, (b, lab) in enumerate(spec["baselines"].items())]
-        series += [(spec["model"], "none", "model, countermeasure off", OFF, "solid"),
-                   (spec["model"], "quality_aware", "model, countermeasure on", ON, "solid")]
-        for pred, mit, lab, col, dash in series:
-            s = pick(E, pred, mit, None)
-            s = s[(s.condition == cond) & (s.window != "all")].groupby("window").agg(err=("err", "mean"),
-                                                                                     cov=("coverage", "mean"))
-            fig.add_scatter(x=xlab, y=natural(t, s.err.to_numpy()), mode="lines+markers", name=lab, legendgroup=lab,
-                            showlegend=lab not in shown, line=dict(color=col, dash=dash, width=2.5),
-                            customdata=s["cov"], hovertemplate=f"{lab}<br>%{{y:.3f}} · %{{customdata:.0%}} answered"
-                                                               "<extra></extra>", row=r + 1, col=c + 1)
-            shown.add(lab)
-        fig.update_yaxes(title_text="top-1 accuracy" if spec.get("accuracy") else spec["label"], row=r + 1, col=c + 1,
-                         **({} if spec.get("accuracy") else LOGY))
-    fig.update_xaxes(title_text="test window · corrupted share (simulated)", row=2)
-    fig.update_layout(height=680, margin=dict(t=40, b=10), legend=dict(orientation="h", y=-0.1))
-    st.plotly_chart(fig, width="stretch")
-    st.caption("Windows are real chronological periods of the test day. The corruption schedule rising across them is "
-               "SIMULATED. Under the clean feed, any change across windows is real drift in traffic, not poisoning.")
-
-# ===================================================================================== tab 2
-with tab_pick:
-    st.markdown("Each chart below maps to a judging criterion. The questions are compared on one scale: "
-                "**error × clean feed**, the model's error under a degraded feed divided by its error on the same "
-                "cases with a clean feed. 1× means no effect. For destination, error is the top-1 miss rate.")
-    H = {t: headline(t) for t in TASKS}
-    H = {t: h for t, h in H.items() if h}
-    SC = staleness_curve()
-
-    # ---------------------------------------------------------------- rubric fit
-    st.subheader("Rubric fit at a glance")
-
-    def age_effect(t):
-        s = SC[(SC.task == t) & (SC.age_min > 0) & (SC.age_min <= 45)]
-        return float(s.sort_values("age_min").model.iloc[-1]) if len(s) else np.nan
-
-    def grade(v, strong, moderate, weak=None):
-        if pd.isna(v):
-            return 0.0
-        if v >= strong:
-            return 1.0
-        if v >= moderate:
-            return 0.6
-        return 0.3 if weak is None or v >= weak else 0.0
-
-    crit = [  # (criterion, row label, value fn, format, grade fn, rubric points for this row)
-        ("C1", "Stale feed: error × clean", lambda t: H[t]["stale"]["x_clean"], "{:.1f}×",
-         lambda v: grade(v, 3, 1.5, 1.1), 2.5),
-        ("C1", "Input 30-45 min old: error × clean", age_effect, "{:.1f}×", lambda v: grade(v, 3, 1.5, 1.1), 2.5),
-        ("C2", "Unreliable source: error × clean", lambda t: H[t]["low_quality"]["x_clean"], "{:.1f}×",
-         lambda v: grade(v, 3, 1.5, 1.1), 5),
-        ("C3", "Combined: error × clean", lambda t: H[t]["combined"]["x_clean"], "{:.1f}×",
-         lambda v: grade(v, 3, 1.5, 1.1), 2.5),
-        ("C3", "Effect grows with corruption share (lowest r of 3 conditions)",
-         lambda t: min(H[t][c]["trend_r"] for c in STRESS) if H[t]["combined"]["x_clean"] > 1.2 else np.nan,
-         "r = {:.2f}", lambda v: grade(v, 0.9, 0.7, 0), 2.5),
-        ("C4", "Countermeasure recovers combined loss", lambda t: H[t]["combined"]["recovered"], "{:.0%}",
-         lambda v: grade(v, 0.8, 0.5, 0), 2),
-        ("C4", "Countermeasure cost on clean feed", lambda t: H[t]["nominal"]["on"] / H[t]["nominal"]["off"] - 1,
-         "{:+.1%}", lambda v: grade(-v, -0.02, -0.08, -0.5), 1.5),
-        ("C4", "Tested on an unseen defect", lambda t: 1.0 if "holdout_unseen_bias" in H[t] else 0.0,
-         "{:.0f}", lambda v: v, 1.5),
-        ("E2", "Model beats main baseline, clean feed",
-         lambda t: 1 - H[t]["nominal"]["off"] / H[t]["nominal"]["base"], "{:+.0%}", lambda v: grade(v, 0.15, 0.05, 0), 0),
-        ("E3", "Combined effect vs seed noise", lambda t: H[t]["combined"]["snr"], "{:.0f}σ",
-         lambda v: grade(v, 10, 3, 1), 0),
-    ]
-    tasks = list(H)
-    Z, T, ylab, pts = [], [], [], {t: 0.0 for t in tasks}
-    for code, lab, fn, fmt, gr, w in crit:
-        vals = [fn(t) for t in tasks]
-        g = [gr(v) for v in vals]
-        Z.append(g)
-        T.append([("yes" if v else "no") if code == "C4" and "unseen" in lab else
-                  ("n/a" if pd.isna(v) else fmt.format(v)) for v in vals])
-        ylab.append(f"<b>{code}</b> {lab}")
-        for t, gv in zip(tasks, g):
-            pts[t] += gv * w
-    fig = go.Figure(go.Heatmap(z=Z, x=[TASKS[t]["short"] for t in tasks], y=ylab, text=T, texttemplate="%{text}",
-                               colorscale=[[0, "#f3e5e5"], [0.3, "#fbe3c4"], [0.6, "#d7ecd9"], [1, "#66bb6a"]],
-                               zmin=0, zmax=1, showscale=False, xgap=3, ygap=3,
-                               hovertemplate="%{x}<br>%{y}<br>%{text}<extra></extra>"))
-    fig.update_yaxes(autorange="reversed")
-    fig.update_xaxes(side="top")
-    fig.update_layout(height=470, margin=dict(t=30, b=10, l=10, r=10))
-    c1, c2 = st.columns([3, 1])
-    c1.plotly_chart(fig, width="stretch")
-    with c2:
-        st.markdown("**Case-criteria evidence (of 20)**")
-        for t in sorted(pts, key=pts.get, reverse=True):
-            st.metric(TASKS[t]["short"], f"{pts[t]:.1f}")
-    st.caption("Green = strong evidence, pale = weak or none. Thresholds: × clean ≥3 strong, ≥1.5 moderate, ≥1.1 weak; "
-               "recovery ≥80% strong; clean-feed cost ≤2% strong. The score weights the C1-C4 rows by their rubric "
-               "points (5 each). It shows how much *evidence* each question supplies for the case criteria, not a "
-               "predicted judge score. E2/E3 rows are shown for context only. Destination recovery is negative "
-               "because deferred stale cases count as misses, and many of them had been answered correctly.")
-
-    # ---------------------------------------------------------------- C1
-    st.subheader("C1 · Does accuracy fall as the input gets older?")
-    fig = go.Figure()
-    for t in tasks:
-        s = SC[SC.task == t].sort_values("age_min")
-        if s.empty:
-            continue
-        col = TASKS[t]["color"]
-        fig.add_scatter(x=s.age_min, y=s.model, mode="lines+markers", name=f"{TASKS[t]['short']} · model",
-                        line=dict(color=col, width=3), customdata=s.n,
-                        hovertemplate="%{x:.0f} min old · %{y:.2f}× clean · n=%{customdata:,}<extra></extra>")
-        fig.add_scatter(x=s.age_min, y=s.baseline, mode="lines", name=f"{TASKS[t]['short']} · baseline",
-                        line=dict(color=col, width=1.5, dash="dot"), customdata=s.n,
-                        hovertemplate="%{x:.0f} min old · %{y:.2f}× clean · n=%{customdata:,}<extra></extra>")
-    fig.add_hline(y=1, line_color="#56606d", line_width=1)
-    fig.update_layout(height=420, margin=dict(t=10, b=10), yaxis=dict(title="error × same case on clean feed", **LOGY),
-                      xaxis_title="age of the newest delivered input (min)", legend=dict(orientation="h", y=-0.2))
-    st.plotly_chart(fig, width="stretch")
-    st.caption("Stale condition, seed 0, matched case by case with the clean run. Position and destination: binned "
-               "age of the latest report the system received. Counts: how late the feed was (the last 15-60 min of "
-               "reports not delivered yet). At 60 min the count models receive an empty last hour and predict near "
-               "zero. Dotted = the question's main baseline, given the same stale input.")
-
-    # ---------------------------------------------------------------- C2
-    st.subheader("C2 · Which quality failures do the damage, and does more of the unreliable source mean more harm?")
-    c1, c2 = st.columns(2)
-    DB = defect_breakdown()
+# ===================================================================================== baseline vs model (E2, E3)
+with t_base:
+    c1, c2 = st.columns(2, gap="large")
     with c1:
-        if len(DB):
-            fig = go.Figure()
-            for t, dash in [("position_15m", None), ("destination", "/")]:
-                s = DB[DB.task == t].sort_values("model")
-                for col, name, color in [("baseline", "baseline", "#9e9e9e"), ("model", "model", OFF),
-                                         ("countermeasure", "countermeasure on", ON)]:
-                    fig.add_bar(y=s.defect, x=s[col], orientation="h", marker_color=color,
-                                marker_pattern_shape=dash, name=f"{TASKS[t]['short']} · {name}",
-                                customdata=s.n, hovertemplate="%{y}<br>%{x:.2f}× clean · n=%{customdata:,}<extra></extra>")
-            fig.add_vline(x=1, line_color="#56606d", line_width=1)
-            fig.update_layout(barmode="group", height=520, margin=dict(t=10, b=10),
-                              xaxis=dict(title="error × same case on clean feed", **LOGY),
-                              legend=dict(orientation="h", y=-0.15))
-            st.plotly_chart(fig, width="stretch")
-            st.caption("Cases that received a SYN-FASTFEED record, grouped by their worst injected defect. Hatched = "
-                       "destination. A gross position outlier makes the position model's error about 160× worse, versus 57× for "
-                       "constant velocity: the trained model extrapolates the corrupted track.")
+        st.subheader("Commercial · ETA")
+        rows = []
+        for pred, lab in [("naive_distance_speed", "Baseline: distance ÷ speed"), ("hgb_eta", "Model: lanes + boosting")]:
+            r = g(EA, condition="nominal", predictor=pred, mitigation="none")
+            rows.append({"predictor": lab, "mean error": ui.dur(r.mae_h), "± seeds": f"{r.mae_sd * 60:.1f} min",
+                         "median": ui.dur(r.median_ae_h), "worst 10% from": ui.dur(r.p90_ae_h),
+                         "bias": f"{r.bias_h * 60:+.0f} min", "answered": f"{r.coverage:.0%}",
+                         "in 80% window": f"{r.interval_coverage:.0%}" if np.isfinite(r.interval_coverage) else "—",
+                         "cases": f"{r.n_cases:,.0f}"})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        b, m = (g(EA, condition="nominal", predictor=p, mitigation="none").mae_h for p in ("naive_distance_speed", "hgb_eta"))
+        z = eta_zone_split()
+        note(f"Clean feed, 3 seeds. The model's mean error is <b>{1 - m / b:.0%} lower</b> than the baseline's "
+             f"({ui.dur(m)} vs {ui.dur(b)}) and it answers more vessels. Both predict the time to the vessel's next "
+             "stop of 30+ min (a proxy for arrival, seen in later AIS; not a berth record). Bias is negative: both "
+             "predict arrival early. Its 80% window holds only ~2/3 of the time: <b>overconfident</b>.")
+        note(f"<b>Failure analysis:</b> the ETA is conditional on the predicted stop area, which is right for "
+             f"{z['share']:.0%} of cases. Right area: mean error {ui.dur(z['right'])}; wrong area: "
+             f"{ui.dur(z['wrong'])}. Most large errors come from the wrong destination, not the timing.")
+        w = EW[(EW.condition == "nominal") & (EW.mitigation == "none")]
+        f = go.Figure()
+        for pred, lab, col in [("naive_distance_speed", "baseline", BASE), ("hgb_eta", "model", ON)]:
+            d = w[w.predictor == pred]
+            f.add_scatter(x=XL, y=d.mae_h * 60, name=lab, mode="lines+markers", line=dict(color=col, width=2.5))
+        style(f, 260, title=dict(text="Mean ETA error by test window, clean feed (min)", font=dict(size=13)))
+        f.update_xaxes(ticktext=[x.split("<br>")[0] for x in XL], tickvals=XL)
+        st.plotly_chart(f, width="stretch")
+        note("The model wins in every window; error swings by window with real traffic (window 4 is harder for "
+             "both), which is why results are reported per window, not one aggregate.")
     with c2:
-        GC = ghost_curve()
-        if len(GC):
-            fig = go.Figure()
-            for t in ["traffic_density", "port_occupancy"]:
-                s = GC[GC.task == t]
-                fig.add_scatter(x=s.extra_ids, y=s.model, mode="lines+markers", name=TASKS[t]["short"],
-                                line=dict(color=TASKS[t]["color"], width=3), customdata=s.n,
-                                hovertemplate="%{x} extra IDs · %{y:.1f}× clean · n=%{customdata:,}<extra></extra>")
-            fig.add_hline(y=1, line_color="#56606d", line_width=1)
-            fig.update_layout(height=520, margin=dict(t=10, b=10), yaxis=dict(title="error × clean feed", **LOGY),
-                              xaxis_title="extra vessel IDs the unreliable source added to the last hour",
-                              legend=dict(orientation="h", y=-0.15))
-            st.plotly_chart(fig, width="stretch")
-            st.caption("Counts, unreliable-source condition, seed 0. This is a direct volume effect: the more ghost "
-                       "IDs, duplicates and invalid MMSIs reach a unit, the larger the error. Port zones are busy, so "
-                       "almost all of them receive 30+ ghosts.")
+        st.subheader("Government · movement anomalies")
+        n0 = g(AA, condition="nominal", mitigation="none")
+        sy = SYN[SYN.condition == "nominal"].set_index("mitigation")
+        st.dataframe(pd.DataFrame([
+            {"check": "Alert rate, clean feed", "value": f"{n0.alert_rate:.1%} of vessel checks",
+             "meaning": "≈ 2.5% by design: flags the top 2.5% vs the 48 h before the test day"},
+            {"check": "Injected 2-8 km drift caught", "value": f"{sy.loc['none', 'recall']:.0%}",
+             "meaning": "known-label test: real normal tracks shifted sideways (SYNTHETIC)"},
+            {"check": "…flagged high deviation", "value": f"{sy.loc['none', 'recall_high']:.0%}",
+             "meaning": "most drifts land just past the threshold"},
+            {"check": "Vessel checks scored", "value": f"{RUN_A.get('n_test_windows', 0):,}",
+             "meaning": f"{RUN_A.get('n_test_vessels', 0):,} vessels, a check every 30 min over the last 60 min"},
+        ]), hide_index=True, width="stretch")
+        note("<b>No verified anomaly labels exist</b> for this data, so real-world precision is not claimed. The "
+             "comparator for poisoning is the same detector on the clean feed: an alert on a degraded feed that the "
+             "clean run did not raise is counted as caused by bad data; a clean-run alert that disappears is "
+             "counted as missed.")
+        note("<b>Limit found:</b> about half of 2-8 km sideways drifts go unflagged. Shipping lanes are wide near "
+             "ports, so a few km off a learned lane is often still normal there.")
+        s = SYN.groupby(["condition", "mitigation"]).recall.mean().unstack()
+        f = go.Figure()
+        for mi, lab, col in [("none", "no countermeasure", OFF), ("quality_aware", "with countermeasure", ON)]:
+            f.add_bar(x=[CONDITIONS[c] for c in CONDITIONS], y=[s.loc[c, mi] for c in CONDITIONS], name=lab,
+                      marker_color=col, text=[f"{s.loc[c, mi]:.0%}" for c in CONDITIONS], textposition="outside")
+        style(f, 260, title=dict(text="Injected drifts caught, by feed", font=dict(size=13)),
+              yaxis=dict(tickformat=".0%", range=[0, 0.7]), barmode="group")
+        st.plotly_chart(f, width="stretch")
 
-    # ---------------------------------------------------------------- C3
-    st.subheader("C3 · Stale-only, unreliable-only and combined, over the ordered timeline")
-    fig = make_subplots(rows=1, cols=3, subplot_titles=list(STRESS.values()), shared_yaxes=True,
-                        horizontal_spacing=0.04)
-    for j, c in enumerate(STRESS):
-        for t in tasks:
-            W = relative_by_window(t)
-            s = W[W.condition == c].groupby("share").ratio.agg(["mean", "std"]).reset_index()
-            fig.add_scatter(x=s.share, y=s["mean"], error_y=dict(type="data", array=s["std"], thickness=1),
-                            mode="lines+markers", name=TASKS[t]["short"], legendgroup=t, showlegend=j == 0,
-                            line=dict(color=TASKS[t]["color"], width=3),
-                            hovertemplate="%{x:.0%} corrupted · %{y:.2f}× clean<extra></extra>", row=1, col=j + 1)
-        fig.add_hline(y=1, line_color="#56606d", line_width=1, row=1, col=j + 1)
-    fig.update_yaxes(**LOGY)
-    fig.update_yaxes(title_text="model error × clean feed (same window)", row=1, col=1)
-    fig.update_xaxes(tickformat=".0%", title_text="corrupted share in window")
-    fig.update_layout(height=420, margin=dict(t=40, b=10), legend=dict(orientation="h", y=-0.2))
-    st.plotly_chart(fig, width="stretch")
-
-    rows = []
-    for t in tasks:
-        h = H[t]
-        s_, l_, c_ = (h[c]["x_clean"] - 1 for c in STRESS)
-        rows.append({"question": TASKS[t]["short"], "stale only": s_, "unreliable only": l_, "sum of the two": s_ + l_,
-                     "combined (observed)": c_})
-    I = pd.DataFrame(rows)
-    fig = go.Figure()
-    for col, color in [("stale only", "#90caf9"), ("unreliable only", "#ffcc80"), ("sum of the two", "#bdbdbd"),
-                       ("combined (observed)", OFF)]:
-        fig.add_bar(x=I.question, y=I[col].clip(lower=1e-3), name=col, marker_color=color,
-                    hovertemplate="%{x}<br>" + col + ": +%{y:.2f}× extra error<extra></extra>")
-    fig.update_layout(barmode="group", height=360, margin=dict(t=10, b=10),
-                      yaxis=dict(title="extra error (× clean − 1)", **LOGY), legend=dict(orientation="h", y=1.12))
-    st.plotly_chart(fig, width="stretch")
-    st.caption("Is the combined damage more or less than the two failures added up? Position is roughly additive. "
-               "For the counts, combined is *less* than the sum: when the feed is late, the ghost rows of the missing "
-               "hour are not delivered either.")
-
-    # ---------------------------------------------------------------- C4
-    st.subheader("C4 · Countermeasure: recovery against the same baseline, coverage cost and limits")
-    c1, c2 = st.columns([3, 2])
+# ===================================================================================== poisoning (C1, C2, C3)
+with t_poison:
+    st.markdown("<div class='sub' style='font-size:14px;color:#d6dce4'>Chain: <b>data age / quality / volume</b> → "
+                "the model's <b>input at decision time</b> (the frozen models are never retrained on bad data: "
+                "poisoning enters at inference) → <b>output</b> (ETA, anomaly score) → <b>decision</b> (berth "
+                "schedule, which vessel a watch officer reviews).</div>", unsafe_allow_html=True)
+    A_age, E_age = age_curves()
+    st.subheader("C1 · Staleness: reports that arrive late")
+    c1, c2 = st.columns(2, gap="large")
     with c1:
-        fig = go.Figure()
-        sym = {"stale": "circle", "low_quality": "square", "combined": "diamond", "holdout_unseen_bias": "star"}
-        for t in tasks:
-            for c, s in sym.items():
-                if c not in H[t]:
-                    continue
-                h = H[t][c]
-                fig.add_scatter(x=[h["coverage_on"]], y=[h["recovered"]], mode="markers",
-                                marker=dict(symbol=s, size=15, color=TASKS[t]["color"], line=dict(width=1, color="#0c0f12")),
-                                name=f"{TASKS[t]['short']} · {STRESS.get(c, 'unseen defect (holdout)')}",
-                                hovertemplate=f"{TASKS[t]['short']} · {STRESS.get(c, 'unseen defect')}<br>"
-                                              "%{x:.0%} answered · %{y:.0%} of the loss recovered<extra></extra>")
-        fig.add_hline(y=0, line_color="#56606d", line_width=1)
-        fig.update_layout(height=430, margin=dict(t=10, b=10), xaxis=dict(title="share of cases answered", tickformat=".0%"),
-                          yaxis=dict(title="share of the poisoning loss recovered", tickformat=".0%"),
-                          legend=dict(font=dict(size=10)))
-        st.plotly_chart(fig, width="stretch")
-        st.caption("Recovered = (error off − error on) ÷ (error off − clean error), with withheld answers charged. "
-                   "Top right is best: most of the loss recovered while still answering. Shapes: ● stale, ■ unreliable, "
-                   "◆ combined, ★ unseen defect (position only).")
+        f = go.Figure(go.Bar(x=A_age.age, y=A_age.alert, marker_color=SCOL["stale"],
+                             text=[f"{v:.1%}" for v in A_age.alert], textposition="outside", customdata=A_age.n,
+                             hovertemplate="%{x} min old · %{y:.2%} flagged · n=%{customdata:,}<extra></extra>"))
+        style(f, 280, title=dict(text="Government: share of vessels flagged vs age of newest report", font=dict(size=13)),
+              yaxis=dict(tickformat=".0%"), xaxis_title="minutes since the newest delivered report")
+        st.plotly_chart(f, width="stretch")
+        note("<b>Where it enters:</b> the detector scores each vessel's last 60 min using only reports delivered by "
+             "then. A late feed leaves an old, short track. <b>Why it changes the output:</b> a short, old track "
+             "shows no movement to judge, so it scores as normal. Once the newest report is over 10 min old almost "
+             "nothing is flagged: stale data <b>silently hides real alerts</b> (false negatives), it never adds any.")
     with c2:
-        cost = pd.DataFrame({"question": [TASKS[t]["short"] for t in tasks],
-                             "cost": [H[t]["nominal"]["on"] / H[t]["nominal"]["off"] - 1 for t in tasks]})
-        fig = go.Figure(go.Bar(x=cost.question, y=cost.cost, marker_color=[TASKS[t]["color"] for t in tasks],
-                               text=[f"{v:+.1%}" for v in cost.cost], textposition="outside"))
-        fig.update_layout(height=430, margin=dict(t=10, b=10), yaxis=dict(title="error change on a clean feed",
-                                                                          tickformat=".0%"))
-        st.plotly_chart(fig, width="stretch")
-        st.caption("Normal-data tradeoff: how much the countermeasure hurts when nothing is wrong. For counts, it "
-                   "drops real one-report vessels.")
+        f = go.Figure()
+        f.add_scatter(x=E_age.age, y=E_age.err / E_age.err0, name="model", mode="lines+markers",
+                      line=dict(color=SCOL["stale"], width=3), customdata=E_age.n,
+                      hovertemplate="%{x} min old · %{y:.2f}× clean · n=%{customdata:,}<extra></extra>")
+        f.add_scatter(x=E_age.age, y=E_age.bl / E_age.bl0, name="baseline", mode="lines+markers",
+                      line=dict(color=BASE, width=2, dash="dot"))
+        f.add_hline(y=1, line=dict(color=ui.C["line2"], width=1))
+        style(f, 280, title=dict(text="Commercial: ETA error ÷ same case on clean feed", font=dict(size=13)),
+              xaxis_title="minutes since the newest delivered report")
+        st.plotly_chart(f, width="stretch")
+        r45 = E_age[E_age.age == "30-45"]
+        note("<b>Where it enters:</b> the ETA starts from the last reported position and speed. A 30-45 min old "
+             "report places the vessel kilometres behind where it is, so the ETA is late. The effect is real but "
+             + (f"small ({float(r45.err.iloc[0] / r45.err0.iloc[0]) - 1:+.0%} at 30-45 min) " if len(r45) else "small ")
+             + "because ETAs look 0-6 h ahead. Staleness matters in proportion to the prediction horizon.")
 
-    # ---------------------------------------------------------------- E2/E3
-    st.subheader("E2 / E3 · Is the trained model more fragile than its baseline?")
-    Z, T = [], []
-    for t in tasks:
-        Z.append([np.log2(H[t][c]["off"] / H[t][c]["base"]) for c in CONDITIONS])
-        T.append([f"{H[t][c]['off'] / H[t][c]['base']:.2f}" for c in CONDITIONS])
-    fig = go.Figure(go.Heatmap(z=Z, x=list(CONDITIONS.values()), y=[TASKS[t]["short"] for t in tasks], text=T,
-                               texttemplate="%{text}", colorscale="RdBu_r", zmid=0, zmin=-2, zmax=2, xgap=3, ygap=3,
-                               colorbar=dict(title="model ÷ baseline", tickvals=[-2, -1, 0, 1, 2],
-                                             ticktext=["¼", "½", "1", "2", "4"], thickness=10),
-                               hovertemplate="%{y} · %{x}<br>model error ÷ baseline error = %{text}<extra></extra>"))
-    fig.update_yaxes(autorange="reversed")
-    fig.update_layout(height=280, margin=dict(t=10, b=10))
-    st.plotly_chart(fig, width="stretch")
-    st.caption("Model error ÷ main-baseline error, both without the countermeasure. Blue = the model is better, "
-               "red = worse. Under the unreliable source, the position model is about twice as bad as constant velocity, "
-               "a clear 'AI amplifies the poisoning' finding. Count models stay close to persistence because they learn "
-               "a correction to it, so they inherit its exposure.")
+    st.subheader("C2 · Low quality: a fast, unreliable second source")
+    c1, c2 = st.columns(2, gap="large")
+    with c1:
+        f = go.Figure()
+        for mi, lab, col in [("none", "no countermeasure", OFF), ("quality_aware", "with countermeasure", ON)]:
+            d = AW[(AW.condition == "low_quality") & (AW.mitigation == mi)]
+            f.add_scatter(x=d.lowq_frac, y=d.spurious_alerts_per_1000, name=lab, mode="lines+markers",
+                          line=dict(color=col, width=3))
+        style(f, 280, title=dict(text="False alerts caused by bad data, per 1000 vessel checks", font=dict(size=13)),
+              xaxis=dict(title="share of vessels receiving unreliable-source reports", tickformat=".0%"))
+        st.plotly_chart(f, width="stretch")
+    with c2:
+        dc = M.get("defect_configuration", {})
+        note("<b>The failure:</b> a second feed ('SYN-FASTFEED') sends extra reports with position jitter "
+             "(~200 m), gross position outliers 3-15 km away (25% of its reports), scaled or missing speeds and "
+             "random courses. It is fast, so it adds volume. <b>Mechanism:</b> one outlier puts the vessel's "
+             "newest position kilometres off its lane; the detector's strongest signal is off-lane distance, so "
+             "the vessel is flagged. These are false positives that a watch officer must clear.")
+        note("<b>Prevalence / volume test:</b> the unreliable source's share rises across the test day (10% → 60% "
+             "of vessels, SIMULATED). False alerts rise with it, almost linearly: more data from the bad source "
+             "means more harm. This is the case's core question: here more information makes the decision worse.")
+        lq = g(AA, condition="low_quality", mitigation="none")
+        note(f"Over the whole test day: {lq.spurious_alerts_per_1000:.0f} false alerts per 1000 checks and the "
+             f"alert rate goes from {g(AA, condition='nominal', mitigation='none').alert_rate:.1%} to "
+             f"{lq.alert_rate:.1%}; the ETA error rises only "
+             f"{g(EA, condition='low_quality', predictor='hgb_eta', mitigation='none').mae_h / g(EA, condition='nominal', predictor='hgb_eta', mitigation='none').mae_h - 1:+.0%}, "
+             "because the ETA uses one sanitised report, not a track.")
 
-    # ---------------------------------------------------------------- recommendation
-    st.subheader("Reading the charts")
-    ranked = sorted(pts, key=pts.get, reverse=True)
-    st.markdown(
-        f"* **Strongest poisoning evidence:** {', '.join(TASKS[t]['short'] for t in ranked[:2])} "
-        f"(case-criteria evidence {pts[ranked[0]]:.1f} and {pts[ranked[1]]:.1f} of 20).\n"
-        "* **Position in 15 min** is the only question with every C1-C4 element: a smooth age-to-error curve, "
-        "a named defect that the model amplifies beyond its physics baseline, a roughly additive interaction, and an unseen-defect "
-        "holdout that shows a limit. Keep it as the anchor.\n"
-        "* **Area traffic density** gives the cleanest *source-volume* story (error rises steadily with the number of ghost IDs) "
-        "and still beats persistence on a clean feed, which supports E2.\n"
-        "* **Port occupancy proxy** shows the most dramatic numbers, but it comes from the same count pipeline as density "
-        "and loses to persistence on a clean feed, so it adds little that density does not.\n"
-        "* **Destination** has the best clean-feed model-vs-baseline gain, but it barely reacts to poisoning: a 6-hour "
-        "horizon makes a 30-minute-old report nearly as good as a fresh one. That makes it a useful *contrast* "
-        "(staleness matters in proportion to the horizon), not a showcase. Its countermeasure also does net harm.")
-    st.caption("Notes reflect the default run's numbers. The scores and charts above recompute when the pipeline is rerun.")
+    st.subheader("C3 · Stale only, unreliable only, and both, across the ordered test day")
+    f = make_subplots(rows=1, cols=3, horizontal_spacing=0.07, subplot_titles=[
+        "Government: false alerts / 1000 checks", "Government: real alerts missed", "Commercial: ETA error ÷ clean"])
+    nom = EW[(EW.condition == "nominal") & (EW.predictor == "hgb_eta") & (EW.mitigation == "none")].set_index("window")
+    for c, lab in STRESS.items():
+        a = AW[(AW.condition == c) & (AW.mitigation == "none")]
+        e = EW[(EW.condition == c) & (EW.predictor == "hgb_eta") & (EW.mitigation == "none")].set_index("window")
+        kw = dict(mode="lines+markers", line=dict(color=SCOL[c], width=3), legendgroup=c)
+        f.add_scatter(x=XL, y=a.spurious_alerts_per_1000, name=lab, row=1, col=1, **kw)
+        f.add_scatter(x=XL, y=a.missed_clean_alert_share, name=lab, showlegend=False, row=1, col=2, **kw)
+        f.add_scatter(x=XL, y=(e.mae_h / nom.mae_h).to_numpy(), name=lab, showlegend=False, row=1, col=3, **kw)
+    f.update_yaxes(tickformat=".0%", row=1, col=2)
+    style(f, 330)
+    f.update_xaxes(tickvals=XL, ticktext=[x.split(" · ")[0] for x in XL], title_text="test window")
+    f.update_annotations(font_size=13)
+    st.plotly_chart(f, width="stretch")
+    note("Windows are the real chronological periods of the test day (labels: window · UTC hours · degraded share). "
+         "The rising degradation schedule (10% → 60%) is SIMULATED. <b>The two failures do different damage:</b> "
+         "unreliable data creates false alerts, stale data hides real ones. 'Both' keeps all of the stale misses "
+         "but fewer false alerts than unreliable alone, because a late feed also delays the bad source's reports. "
+         "For the ETA neither effect is large; window-to-window swings come from real traffic.")
+
+# ===================================================================================== countermeasure (C4)
+with t_fix:
+    st.markdown("<div class='sub' style='font-size:14px;color:#d6dce4'>Countermeasure (fixed before testing, "
+                "never tuned on the test day): drop reports with impossible speeds or position jumps, move an old "
+                "position forward along its course, and <b>withhold the answer and send it to a reviewer</b> when "
+                "the newest report is over 20 min old. Every row below scores the same cases.</div>",
+                unsafe_allow_html=True)
+    c1, c2 = st.columns(2, gap="large")
+    with c1:
+        st.subheader("Government")
+        rows = []
+        for c, lab in CONDITIONS.items():
+            for mi, ml in [("none", "off"), ("quality_aware", "on")]:
+                r = g(AA, condition=c, mitigation=mi)
+                rows.append({"feed": lab, "fix": ml, "false alerts / 1000": f"{r.spurious_alerts_per_1000:.1f}",
+                             "real alerts missed": f"{r.missed_clean_alert_share:.0%}",
+                             "given a verdict": f"{r.coverage:.0%}", "alerts / 1000": f"{1000 * r.alert_rate:.0f}"})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", height=35 * 9 + 3)
+    with c2:
+        st.subheader("Commercial")
+        rows = []
+        for c, lab in CONDITIONS.items():
+            for mi, ml in [("none", "off"), ("quality_aware", "on")]:
+                r = g(EA, condition=c, predictor="hgb_eta", mitigation=mi)
+                rows.append({"feed": lab, "fix": ml, "mean error": ui.dur(r.mae_h), "held": f"{1 - r.coverage:.0%}",
+                             "error, held ones charged": ui.dur(r.policy_mae_h),
+                             "in 80% window": f"{r.interval_coverage:.0%}"})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", height=35 * 9 + 3)
+    a_lq, a_lq1 = g(AA, condition="low_quality", mitigation="none"), g(AA, condition="low_quality", mitigation="quality_aware")
+    a_c, a_c1 = g(AA, condition="combined", mitigation="none"), g(AA, condition="combined", mitigation="quality_aware")
+    a_n, a_n1 = g(AA, condition="nominal", mitigation="none"), g(AA, condition="nominal", mitigation="quality_aware")
+    e_s, e_s1 = (g(EA, condition="stale", predictor="hgb_eta", mitigation=m) for m in ("none", "quality_aware"))
+    w4 = AW[(AW.window == AW.window.max()) & (AW.condition == "low_quality")].set_index("mitigation")
+    sy = SYN.groupby(["condition", "mitigation"]).recall.mean()
+    c1, c2 = st.columns(2, gap="large")
+    with c1:
+        st.markdown("**What it fixes**")
+        note(f"• False alerts from the unreliable source: {a_lq.spurious_alerts_per_1000:.0f} → "
+             f"{a_lq1.spurious_alerts_per_1000:.0f} per 1000 checks "
+             f"(<b>{1 - a_lq1.spurious_alerts_per_1000 / a_lq.spurious_alerts_per_1000:.0%} removed</b>); "
+             f"both failures together: {a_c.spurious_alerts_per_1000:.0f} → {a_c1.spurious_alerts_per_1000:.0f}.")
+        note(f"• <b>New, unseen condition:</b> window 5, the latest and most degraded period, was held out when the "
+             f"thresholds were set. It still removes {1 - w4.loc['quality_aware', 'spurious_alerts_per_1000'] / w4.loc['none', 'spurious_alerts_per_1000']:.0%} "
+             "of false alerts there.")
+        note(f"• <b>Normal data cost:</b> on the clean feed the alert rate is unchanged ({a_n.alert_rate:.1%} → "
+             f"{a_n1.alert_rate:.1%}) but {a_n.coverage - a_n1.coverage:.0%} of vessels lose their verdict because "
+             "their own reports are genuinely over 20 min apart.")
+    with c2:
+        st.markdown("**Where it fails**")
+        note(f"• <b>Stale data: nothing recovered.</b> Real alerts missed stays at "
+             f"{g(AA, condition='stale', mitigation='quality_aware').missed_clean_alert_share:.0%}. The fix cannot "
+             "invent the missing reports; it can only say 'no verdict' (verdicts drop to "
+             f"{g(AA, condition='stale', mitigation='quality_aware').coverage:.0%}), which at least tells the "
+             "officer the picture is incomplete instead of showing a clean map.")
+        note(f"• <b>ETA, adverse tradeoff:</b> on the stale feed it holds {1 - e_s1.coverage:.0%} of ETAs for "
+             f"review, but most of them were still usable: counting each held ETA as a typical bad miss, "
+             f"error goes from {ui.dur(e_s.policy_mae_h)} to {ui.dur(e_s1.policy_mae_h)}. For a 0-6 h ETA, a "
+             "20-min age limit is too strict; the threshold should scale with the horizon.")
+        note(f"• <b>Rare real events:</b> it suppresses some genuine deviations. Injected drifts caught on the "
+             f"unreliable feed: {sy.get(('low_quality', 'none'), np.nan):.0%} → "
+             f"{sy.get(('low_quality', 'quality_aware'), np.nan):.0%} (clean feed "
+             f"{sy.get(('nominal', 'none'), np.nan):.0%} → {sy.get(('nominal', 'quality_aware'), np.nan):.0%}).")
+    f = make_subplots(rows=1, cols=2, horizontal_spacing=0.08,
+                      subplot_titles=["Both failures: false alerts / 1000 checks, by window",
+                                      "Both failures: vessels given a verdict, by window"])
+    for mi, lab, col in [("none", "countermeasure off", OFF), ("quality_aware", "countermeasure on", ON)]:
+        d = AW[(AW.condition == "combined") & (AW.mitigation == mi)]
+        f.add_scatter(x=XL, y=d.spurious_alerts_per_1000, name=lab, mode="lines+markers", legendgroup=mi,
+                      line=dict(color=col, width=3), row=1, col=1)
+        f.add_scatter(x=XL, y=d.coverage, name=lab, mode="lines+markers", legendgroup=mi, showlegend=False,
+                      line=dict(color=col, width=3), row=1, col=2)
+    f.update_yaxes(tickformat=".0%", row=1, col=2)
+    style(f, 300)
+    f.update_xaxes(tickvals=XL, ticktext=[x.split(" · ")[0] for x in XL], title_text="test window")
+    f.update_annotations(font_size=13)
+    st.plotly_chart(f, width="stretch")
+    cov5 = AW[(AW.condition == "combined") & (AW.mitigation == "quality_aware")].sort_values("window").coverage.iloc[-1]
+    note(f"Recovery has a price paid in coverage: by window 5 the countermeasure gives a verdict on {cov5:.0%} of "
+         "vessels. Rejecting everything would also remove every false alert, so coverage is always reported next to "
+         "the error.")
+
+# ===================================================================================== human oversight (E4)
+with t_human:
+    c1, c2 = st.columns([1.15, 1], gap="large")
+    with c1:
+        st.subheader("Who does what")
+        st.dataframe(pd.DataFrame([
+            {"": "Uses the output", "Commercial": "Port scheduler: plans berths and pilots from ETAs",
+             "Government": "Watch officer: chooses which vessels to look at"},
+            {"": "System must defer", "Commercial": "Newest report > 20 min old, impossible jump, or no stop area "
+                                                    "in reach: ETA held",
+             "Government": "Newest report > 20 min old: 'no verdict' instead of a score"},
+            {"": "Reviews", "Commercial": "Scheduler reviews held ETAs and any ETA whose window overlaps a berth "
+                                          "conflict", "Government": "Officer reviews every flagged vessel; held ones "
+                                                                    "go to the data-quality owner"},
+            {"": "Sees as evidence", "Commercial": "Report age, source, injected defects, track, expected route, "
+                                                   "80% window, baseline ETA",
+             "Government": "Score, plain-language reasons, report age, gaps, spikes, track vs expected lane, weather"},
+            {"": "Corrects by", "Commercial": "Use / correct ETA (typed) / request fresh position + reason",
+             "Government": "Escalate / no action / false positive (bad data or normal movement) + reason"},
+            {"": "Logged to", "Commercial": "results/review_log.csv with measured review seconds",
+             "Government": "same file, same fields"},
+        ]), hide_index=True, width="stretch")
+        note("<b>Walkthrough of an unreliable output</b> (live demo): Government → feed 'Unreliable source', "
+             "countermeasure off → click a red/amber vessel → 'Why' says it is km off its lane → 'Data trust' "
+             "shows spikes from the simulated source → record 'False positive: bad data'. Turn the countermeasure on "
+             "and the same vessel is no longer flagged.")
+    with c2:
+        st.subheader("Effect on human effort")
+        rows = []
+        for c, lab in CONDITIONS.items():
+            for mi, ml in [("none", "off"), ("quality_aware", "on")]:
+                r = g(AA, condition=c, mitigation=mi)
+                rows.append({"feed": lab, "fix": ml, "alerts to review": f"{1000 * r.alert_rate:.0f}",
+                             "of which bad data": f"{r.spurious_alerts_per_1000:.0f}",
+                             "held for data review": f"{1000 * (1 - r.coverage):.0f}"})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch", height=35 * 9 + 3)
+        n_, n1_ = g(AA, condition="nominal", mitigation="none"), g(AA, condition="nominal", mitigation="quality_aware")
+        note("Per 1000 vessel checks (Government). On feeds with unreliable data the countermeasure cuts the "
+             "officer's alert queue by more than half, but moves work to the data-quality queue (held vessels); on "
+             f"the stale feed it only adds holds. On the clean feed it adds {1000 * (n_.coverage - n1_.coverage):.0f} "
+             "holds per 1000 checks for no alert benefit: the workload cost of the fix.")
+        z = eta_zone_split()
+        log = pd.read_csv(LOG) if LOG.exists() else pd.DataFrame()
+        secs = log.review_seconds_measured.dropna() if "review_seconds_measured" in log else pd.Series(dtype=float)
+        note(f"<b>Machine time vs human time:</b> the model takes {z['ms_un']:.2f} ms per ETA "
+             f"({z['ms_mi']:.2f} ms with the countermeasure). Human review time is measured from opening a vessel to "
+             "recording a decision: "
+             + (f"<b>{len(secs)} reviews logged, median {secs.median():.0f} s</b>." if len(secs) else
+                "<b>no reviews logged yet</b> in results/review_log.csv.")
+             + " These are team walkthroughs only; they say nothing about trust or speed of trained operators, "
+               "which a pilot would have to measure.")
+
+# ===================================================================================== study card (E1, E5, E6, E7)
+with t_card:
+    c1, c2 = st.columns(2, gap="large")
+    ds = M.get("dataset", {})
+    with c1:
+        st.subheader("Decision and success")
+        note("<b>Commercial:</b> a port scheduler decides berth and pilot order from ETAs. A late ETA idles a "
+             "berth; an early one queues ships. Success = lower mean ETA error than distance ÷ speed, an 80% window "
+             "that holds ~80% of the time, and on a degraded feed, error that stays near clean without withholding "
+             "most ETAs.")
+        note("<b>Government:</b> a watch officer decides which vessels to look at. A false alert wastes review time; "
+             "a missed one leaves unusual movement unseen. Success = on a degraded feed, few alerts caused by bad "
+             "data and few clean-feed alerts lost, at high coverage.")
+        note("<b>AI component:</b> gradient-boosted ETA models and a lane-relative anomaly score learned from 3 days "
+             "of AIS, both trained once and frozen (not retrained during the test). Poisoning is applied at "
+             "inference, on the feed the models read.")
+        st.subheader("Next step")
+        note("<b>Recommendation: controlled pilot, shadow mode.</b> Government detector + countermeasure, one port "
+             "region, 4 weeks, read-only, no automated action. Owner: model owner (ML engineer) with the AIS feed "
+             "steward. Approval: operations supervisor. Checkpoint at week 2: stop if bad-data alerts are not at "
+             "least 50% below the unprotected run, or held vessels exceed 30% for two days. "
+             "<b>Iterate first on the ETA:</b> its countermeasure costs more than it saves (age limit too strict).")
+    with c2:
+        st.subheader("Data, governance, reproducibility")
+        st.dataframe(pd.DataFrame([
+            ("Source", ds.get("name", "")),
+            ("Product", ds.get("product", "")),
+            ("Files", ", ".join(x.split("/")[-1] for x in ds.get("files_used", []))),
+            ("Split", f"train before {SPLIT} UTC, test after; test vessels never seen in training"),
+            ("Defects", "SIMULATED in memory, labelled per case; raw files unchanged"),
+            ("Rights", "public U.S. government AIS (MarineCadastre); raw files are not redistributed here"),
+            ("Privacy", "vessel IDs are public broadcasts; no attempt to identify people"),
+            ("Bias risk", "lanes learned from busy commercial traffic: rare routes and small craft score as unusual"),
+            ("Not for", "navigation, collision avoidance, or evidence of intent or identity"),
+            ("Versions", ", ".join(f"{k} {v}" for k, v in M.get("environment", {}).get("packages", {}).items())),
+            ("Reproduce", "scripts\\run_pipeline.py --subsets jan01_04 --train-frac 0.75 ; streamlit run app\\dashboard.py"),
+            ("AI use", M.get("ai_disclosure", "")),
+        ], columns=["", "detail"]), hide_index=True, width="stretch", height=35 * 13 + 3)
+        with st.expander("Full run manifest (results/manifest.json)"):
+            st.code(json.dumps({k: M.get(k) for k in ("generated_utc", "default_demo_subset", "split", "seeds",
+                                                     "defect_configuration", "countermeasure", "modification_log")},
+                               indent=1), language="json")

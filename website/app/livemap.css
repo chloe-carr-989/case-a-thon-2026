@@ -3,21 +3,21 @@
   --fg: #d6dce4; --dim: #8a95a3; --accent: #49b6dc;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
   height: max(420px, calc(100dvh - var(--livemap-chrome, 150px)));
-  display: grid; grid-template-rows: auto 34px 1fr; gap: 6px;
+  display: grid; grid-template-rows: auto 1fr; gap: 6px;
   font: 13px var(--mono); color: var(--fg); outline: none;
 }
-.bar { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bar { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
 .btn { background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 3px; color: var(--fg);
        font: 13px var(--mono); padding: 4px 10px; cursor: pointer; white-space: nowrap; }
 .btn:hover { border-color: var(--accent); }
 .btn.on { border-color: var(--accent); color: var(--accent); }
-.play { min-width: 42px; }
-.head { flex: 1; min-width: 80px; accent-color: var(--accent); }
-.seg { display: flex; }
-.seg .btn { border-radius: 0; margin-left: -1px; }
-.seg .btn:first-child { border-radius: 3px 0 0 3px; } .seg .btn:last-child { border-radius: 0 3px 3px 0; }
-.now { font: 500 14px var(--mono); min-width: 21ch; text-align: right; font-variant-numeric: tabular-nums; }
-.strip { width: 100%; height: 34px; display: block; cursor: pointer; }
+.play { min-width: 44px; height: 40px; font-size: 15px; }
+.tl { flex: 1; min-width: 80px; display: grid; gap: 2px; }
+.strip { width: 100%; height: 40px; display: block; cursor: ew-resize; touch-action: none; }
+.cap { display: flex; flex-wrap: wrap; gap: 2px 16px; font: 12px var(--mono); color: var(--dim); }
+.cap i { display: inline-block; width: 10px; height: 8px; margin-right: 5px; background: var(--c); vertical-align: 0; }
+.cap i.line { height: 0; border-top: 2px solid var(--c); background: none; vertical-align: 3px; }
+.now { font: 500 14px var(--mono); min-width: 21ch; text-align: right; font-variant-numeric: tabular-nums; line-height: 40px; }
 .map { position: relative; min-height: 0; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
 .cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 .hud { position: absolute; left: 10px; top: 8px; display: grid; gap: 2px; pointer-events: none;
@@ -38,6 +38,6 @@
            font: 14px var(--mono); }
 @media (max-width: 640px) {
   .root { height: 72dvh; }
-  .speed, .legend { display: none; }
+  .legend { display: none; }
   .now { min-width: 0; font-size: 13px; }
 }

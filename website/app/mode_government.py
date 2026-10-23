@@ -9,9 +9,8 @@ import streamlit as st
 import livemap
 import ui
 from aisdp.lanes import CATEGORY_LABEL, lane_group
-from common import CONDITIONS, log_review, metrics
+from common import CONDITIONS, log_review
 
-ui.header("Government · movement anomalies")
 if not ui.available("anomaly_windows.parquet") or ui.lanes() is None:
     ui.unavailable("Anomaly scoring")
 
@@ -25,61 +24,7 @@ LABEL_TEXT = {"normal": "Normal", "unusual": "Unusual", "high": "High deviation"
               "no_data": "No data delivered"}
 
 
-# ------------------------------------------------------------------------------------------- evaluation
-@st.dialog("Model evaluation", width="large")
-def evaluation():
-    m = metrics("anomaly")
-    s = metrics("anomaly_synthetic")
-    if m.empty:
-        st.write("No anomaly metrics in results/metrics.csv.")
-        return
-    g = m[(m.window == "all")]
-    rows = []
-    for c, lab in CONDITIONS.items():
-        for mi, ml in [("none", "naive"), ("quality_aware", "countermeasure")]:
-            a = g[(g.condition == c) & (g.mitigation == mi)]
-            b = s[(s.condition == c) & (s.mitigation == mi)]
-            if a.empty:
-                continue
-            a = a.iloc[0]
-            rows.append({"feed": lab, "pipeline": ml, "alerts per 1000 windows": 1000 * a.alert_rate,
-                         "alerts caused by bad data / 1000": a.spurious_alerts_per_1000,
-                         "clean-feed alerts lost": a.missed_clean_alert_share, "verdict coverage": a.coverage,
-                         "injected drifts caught": b.recall.iloc[0] if len(b) else np.nan})
-    t = pd.DataFrame(rows)
-    st.markdown(f"<div class='sub'>Selected feed: <b>{CONDITIONS[cond]}</b>. "
-                "Same held-out vessel-windows in every row; degraded feeds are SIMULATED.</div>",
-                unsafe_allow_html=True)
-    st.dataframe(t.style.format({"alerts per 1000 windows": "{:.1f}", "alerts caused by bad data / 1000": "{:.1f}",
-                                 "clean-feed alerts lost": "{:.0%}", "verdict coverage": "{:.0%}",
-                                 "injected drifts caught": "{:.0%}"})
-                 .apply(lambda r: [f"background-color: {ui.C['panel']}" if r.feed == CONDITIONS[cond] else ""
-                                   for _ in r], axis=1), hide_index=True, width="stretch")
-    w = m[(m.window != "all") & (m.condition == cond)].copy()
-    if cond != "nominal" and len(w):
-        w["window"] = w.window.astype(int)
-        f = go.Figure()
-        for mi, name, col in [("none", "naive", ui.C["crit"]), ("quality_aware", "countermeasure", ui.C["accent"])]:
-            d = w[w.mitigation == mi].sort_values("window")
-            f.add_scatter(x=d.window, y=d.spurious_alerts_per_1000, name=name, mode="lines+markers",
-                          line=dict(color=col, width=2))
-        share = w[w.mitigation == "none"].sort_values("window")
-        f.update_xaxes(tickvals=share.window, ticktext=[f"{max(a, b):.0%} of windows degraded" for a, b in
-                                                        zip(share.stale_frac, share.lowq_frac)])
-        f.update_layout(height=240, margin=dict(l=0, r=0, t=10, b=0), yaxis_title="bad-data alerts / 1000",
-                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                        legend=dict(orientation="h", y=1.15))
-        st.plotly_chart(f, width="stretch", theme="streamlit")
-    st.markdown("""<div class='note'>
-No verified anomaly labels exist for this data, so real-world detection accuracy is not claimed.
-<b>alerts caused by bad data</b> = alerts on a degraded feed that the same pipeline did not raise on the clean feed.
-<b>injected drifts caught</b> = known-label check: 2-8 km lateral drifts added to normal windows.
-On clean calibration data about 2.5% of windows are 'unusual' by construction (97.5th percentile).
-The countermeasure trades coverage (no verdict on data older than 20 min) for fewer data-driven alerts.
-</div>""", unsafe_allow_html=True)
-
-
-area, layers, cond, mitig, panel = ui.toolbar("gov", ["Sea lanes"])
+area, layers, cond, mitig = ui.toolbar("gov", ["Sea lanes"])
 mit = "quality_aware" if mitig else "none"
 W = ui.windows(cond, mit)
 steps = np.sort(W["T"].unique())
@@ -88,9 +33,6 @@ ui.keep("gov_cats", [c for c in ui.FOCUS_DEFAULT if c in cats])
 focus = st.session_state["gov_cats"] or cats
 inreg = ui.in_box(W.lat, W.lon, area) & W.category.astype(str).isin(focus).to_numpy()
 alerts = W[inreg & W.label.isin(["unusual", "high"]).to_numpy()]
-if st.session_state.get("gov_eval"):
-    livemap.command(playing=False)
-    evaluation()
 
 
 # ------------------------------------------------------------------------------------------- panel
@@ -136,7 +78,7 @@ def dossier(r, T):
         st.markdown(f"<div class='big'>{r.score:.0f}<small>/ 100 anomaly score</small></div><div class='sub'>"
                     f"more deviant than {r.score:.1f}% of {CATEGORY_LABEL.get(str(r.category), '').lower()} "
                     "windows on the calibration days</div>", unsafe_allow_html=True)
-    t_why, t_vessel, t_review = st.tabs(["Why", "Vessel & data", "Review"])
+    t_why, t_vessel, t_review = st.tabs(["Why", "Data trust", "Review"])
     with t_why:
         why = explain(r)
         if lab in ("unusual", "high") or why:
@@ -182,12 +124,16 @@ def dossier(r, T):
                                                                           ("unreliable source", r.is_lowq)] if f))))
         st.markdown("<div class='eyebrow'>AIS data quality</div>" + ui.kv(dq), unsafe_allow_html=True)
     with t_review:
+        st.markdown("<div class='sub'>Reviewer: <b>watch officer</b>. Confirm, dismiss as a false positive, or "
+                    "escalate. No verdict is given on data over 20 min old. Every decision and its review time is "
+                    "logged.</div>", unsafe_allow_html=True)
         tkey = f"gov_t0_{int(r.mmsi)}_{T}"
         st.session_state.setdefault(tkey, time.time())
         with st.form("gov_review", clear_on_submit=True, border=False):
-            act = st.radio("Decision", ["Reviewed: needs follow-up", "Reviewed: no action", "False positive"],
+            act = st.radio("Decision", ["Escalate: needs follow-up", "Reviewed: no action",
+                                        "False positive: bad data", "False positive: normal movement"],
                            label_visibility="collapsed")
-            note = st.text_input("Note", placeholder="e.g. course change matches weather routing")
+            note = st.text_input("Reason", placeholder="e.g. course change matches weather routing")
             if st.form_submit_button("Record review"):
                 log_review({"task": "anomaly", "mmsi": int(r.mmsi), "window_end_utc": ui.stamp(T), "condition": cond,
                             "countermeasure_on": mitig, "system_label": lab, "score": round(float(r.score), 1)
@@ -197,9 +143,8 @@ def dossier(r, T):
 
 
 def queue(now, T):
-    st.markdown(f"<div class='eyebrow'>alert queue · {ui.hhmm(T)} UTC</div>", unsafe_allow_html=True)
-    st.pills("Vessel types", cats, selection_mode="multi", format_func=lambda c: CATEGORY_LABEL.get(c, c),
-             key="w_gov_cats", on_change=ui.sync, args=("gov_cats",), label_visibility="collapsed")
+    st.markdown(f"<div class='eyebrow' style='margin-top:4px'>alert queue · {ui.hhmm(T)} UTC</div>",
+                unsafe_allow_html=True)
     q = now[now.label.isin(["unusual", "high"])].sort_values("score", ascending=False)
     if q.empty:
         st.markdown("<div class='sub'>No unusual movement in view at this time.</div>", unsafe_allow_html=True)
@@ -209,8 +154,8 @@ def queue(now, T):
                             "score": q.score.round(0).astype(int),
                             "why": [", ".join(x.replace("_", " ") for x in ui.reasons_list(s)) or "combined"
                                     for s in q.reasons]})
-        ev = st.dataframe(tab, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
-                          height=min(35 * len(tab) + 38, 330), key="gov_queue",
+        ev = st.dataframe(tab, hide_index=True, width="stretch", height="stretch", on_select="rerun",
+                          selection_mode="single-row", key="gov_queue",
                           column_config={"score": st.column_config.ProgressColumn(
                               "score", min_value=0, max_value=100, format="%d")})
         rows = ev.selection.rows if ev is not None else []
@@ -220,12 +165,10 @@ def queue(now, T):
             st.rerun()
     held = now[now.label.isin(["no_verdict", "no_data"])]
     if len(held):
-        st.markdown(f"<div class='sub' style='margin-top:4px'>{len(held)} vessels held for data review "
-                    "(newest report older than 20 min): shown as rings, not scored.</div>",
-                    unsafe_allow_html=True)
-    st.markdown("<div class='note' style='margin-top:8px'>Labels rank movement against learned traffic "
-                "patterns. They are prompts for human review, not evidence of identity, intent or threat. "
-                "Click a vessel on the map or in the list.</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='sub'>{len(held)} vessels with no verdict: newest report over 20 min old "
+                    "(grey rings on the map).</div>", unsafe_allow_html=True)
+    st.markdown("<div class='note'>Score = how unusual the last hour of movement is vs. past traffic on these "
+                "lanes (97.5+ flagged). A review prompt, not proof of intent.</div>", unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------------------------------- live map + panel
@@ -244,7 +187,7 @@ VERSION = f"gov|{area}|{cond}|{mit}|{','.join(focus)}|{','.join(layers)}"
 
 @st.fragment
 def live():
-    map_col, side = st.columns([2.3, 1], gap="medium") if panel else (st.container(), None)
+    map_col, side = st.columns([2.3, 1], gap="medium")
     sel = st.session_state.get("gov_sel")
     T_prev = livemap.current_step("gov_map", steps)
     now = W[(W["T"] == T_prev) & inreg]
@@ -271,7 +214,8 @@ def live():
     flagged = int(now.label.isin(["unusual", "high"]).sum())
     with map_col:
         T, hit = livemap.render(
-            "gov_map", area=area, steps=steps, counts=alerts.groupby("T").size(), mk=MK, cats=focus,
+            "gov_map", area=area, steps=steps, counts=alerts.groupby("T").size(), bars="flagged vessels in view",
+            degr=ui.degraded_share(cond), mk=MK, cats=focus,
             layer_groups=(grp,), layers=layers, legend=LEGEND + LEGEND_SEL, sel=overlay, fit_box=fit,
             click_heads=True, version=VERSION,
             hud=[f"{len(now):,} vessels reporting · {flagged} flagged",
@@ -282,12 +226,11 @@ def live():
         st.rerun()
     if T != T_prev:                                  # the map moved to another step: refresh the panel for it
         st.rerun(scope="fragment")
-    if side is not None:
-        with side, st.container(key="side_box"):
-            if S is not None:
-                dossier(S, T)
-            else:
-                queue(now, T)
+    with side, st.container(key="side_box"):
+        if S is not None:
+            dossier(S, T)
+        else:
+            queue(now, T)
 
 
 live()

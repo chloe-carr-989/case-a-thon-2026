@@ -1,4 +1,4 @@
-"""Shared interface for the Commercial and Government modes: data access, header, toolbar, formatting.
+"""Shared interface: top bar for every page; data access, toolbar, poisoning card and formatting for the two modes.
 
 Everything shown comes from files written by scripts/run_pipeline.py (results/). Model computation lives in
 src/aisdp; the only model call made here is drawing an expected route on the already-learned lane graph.
@@ -33,8 +33,25 @@ TRAIL_SAMPLE_S = 300     # trail resolution when zoomed in (30 min when zoomed o
 
 CSS = f"""
 <style>
-.block-container {{padding: 3.4rem 1.25rem .5rem; max-width: 100%;}}
-[data-testid="stHeader"] {{background: {C['panel']}; border-bottom: 1px solid {C['line']};}}
+:root {{--livemap-chrome: 146px;}}
+.block-container {{padding: .5rem 1.25rem .5rem; max-width: 100%;}}
+[data-testid="stHeader"] {{display: none;}}
+/* top bar: title on the left, modes and evaluation pages on the right */
+.st-key-topbar {{border-bottom: 1px solid {C['line']}; padding: 2px 0 8px; margin-bottom: 2px; min-height: 52px;}}
+.st-key-topbar [data-testid="stPageLink"] a {{padding: 7px 16px; border-radius: 3px; margin: 0;}}
+.st-key-topbar [data-testid="stPageLink"] p {{font: 500 15px 'IBM Plex Sans', sans-serif; color: {C['dim']};
+           white-space: nowrap;}}
+.st-key-topbar [class*="st-key-navon"] a {{background: {C['panel']}; box-shadow: inset 0 -2px 0 {C['accent']};}}
+.st-key-topbar [class*="st-key-navon"] p {{color: {C['fg']};}}
+.st-key-navtabs {{border: 1px solid {C['line2']}; border-radius: 4px; padding: 2px;}}
+[data-baseweb="tab"] p {{font-size: 15px !important;}}
+.brand {{font: 600 19px 'IBM Plex Sans', sans-serif; letter-spacing: .01em; color: {C['fg']}; white-space: nowrap;}}
+.brand span {{color: {C['accent']};}}
+/* the data-poisoning controls: their own group, amber while a degraded feed is on */
+[class*="st-key-poison"] {{border: 1px solid {C['line2']}; border-radius: 4px; padding: 3px 10px;}}
+.st-key-poison_on {{border-color: {C['warn']}; background: rgba(233, 180, 76, .06);}}
+.ptag {{font: 500 12px 'IBM Plex Mono', monospace; letter-spacing: .06em; text-transform: uppercase;
+        color: {C['warn']}; white-space: nowrap;}}
 h1, h2, h3, h4 {{letter-spacing: .005em;}}
 .eyebrow {{font: 500 12px 'IBM Plex Mono', monospace; letter-spacing: .06em; text-transform: uppercase;
           color: {C['dim']}; margin: 0 0 4px;}}
@@ -61,8 +78,13 @@ h1, h2, h3, h4 {{letter-spacing: .005em;}}
 [data-testid="stStatusWidget"], [data-testid="stSkeleton"] {{display: none !important;}}
 /* one screen, no page scroll: map and side panel take the height the viewport leaves */
 .block-container [data-testid="stVerticalBlock"] {{gap: .45rem;}}
-.st-key-side_box {{height: max(420px, calc(100dvh - 150px)); overflow-y: auto; overflow-x: hidden; padding-right: 4px;}}
-@media (max-width: 640px) {{ .block-container {{padding: 3.4rem 1rem 1rem}} .big {{font-size: 24px}}
+.st-key-side_box {{height: max(420px, calc(100dvh - var(--livemap-chrome))); overflow-y: auto; overflow-x: hidden;
+                    padding-right: 4px; flex-wrap: nowrap; flex: none !important;}}
+.st-key-side_box > * {{flex-shrink: 0 !important;}}
+.st-key-side_box [data-testid="stMarkdownContainer"] {{margin-bottom: 0 !important;}}
+.st-key-side_box > [class*="_queue"] {{flex: 1 1 0 !important; min-height: 120px;}}
+.st-key-side_box > [class*="_queue"] > div {{height: 100% !important;}}
+@media (max-width: 640px) {{ .block-container {{padding: .5rem 1rem 1rem}} .big {{font-size: 24px}} .brand {{display: none}}
   .st-key-side_box {{height: auto; overflow: visible}} }}
 </style>
 """
@@ -231,44 +253,53 @@ def category_of(vtype) -> str:
     return {30: "fishing", 36: "pleasure", 37: "pleasure"}.get(int(t), "other")
 
 
-# ------------------------------------------------------------------------------------------- header + toolbar
-def header(mode: str):
+# ------------------------------------------------------------------------------------------- top bar + toolbar
+def topbar(modes: dict, evals: dict, current):
+    """Every page: the title on the left; the two modes and the two evaluation pages, as one tab group, on the right."""
     style()
-    m, r = manifest(), run_info()
-    prof = m.get("dataset", {}).get("profile_observed", {})
-    split = m.get("split", {}).get("split_t_utc", "")
-    st.markdown(
-        f"<div class='bar'><b>AIS Maritime Intelligence</b><span>{esc(mode)}</span>"
-        f"<span>data <i>{esc(prof.get('time_min', '')[:10])} → {esc(prof.get('time_max', '')[:10])}</i></span>"
-        f"<span>models trained before <i>{esc(split[:16])} UTC</i></span>"
-        f"<span>timeline = held-out period</span></div>", unsafe_allow_html=True)
-    return m, r
+    with st.container(horizontal=True, vertical_alignment="center", key="topbar", gap=None):
+        st.html("<div class='brand'>AIS Maritime <span>Intelligence</span></div>", width="content")
+        st.space("stretch")
+        with st.container(horizontal=True, vertical_alignment="center", key="navtabs", gap=None, width="content"):
+            for i, (label, p) in enumerate({**modes, **evals}.items()):
+                with st.container(key=f"nav{'on' if p.url_path == current.url_path else 'off'}_{i}", width="content"):
+                    st.page_link(p, label=label)
 
 
 def toolbar(mode: str, layers_default: list[str]):
-    """Compact one-row map toolbar. Returns (area, layers, condition, countermeasure, panel).
-
-    Its "Model evaluation" button sets st.session_state[f"{mode}_eval"]; the page opens its dialog on that."""
+    """Map toolbar: region and layers, then the data-poisoning test as its own group. Returns
+    (area, layers, condition, countermeasure)."""
     keep("area", "Houston / Galveston")
     keep(f"{mode}_layers", layers_default)
     keep("cond", "nominal")
     keep("mitig", True)
-    keep("panel", True)
-    c1, c2, c3, c4, c5, c6 = st.columns([2.1, 2.8, 3.6, 1.6, 0.9, 1.5], vertical_alignment="center")
+    c1, c2, c3 = st.columns([1.7, 2.3, 5.6], vertical_alignment="center")
     c1.selectbox("Region", list(AREAS), key="w_area", on_change=sync, args=("area",), label_visibility="collapsed")
     c2.pills("Layers", ["Sea lanes", "Density", "Weather"], selection_mode="multi", key=f"w_{mode}_layers",
              on_change=sync, args=(f"{mode}_layers",), label_visibility="collapsed")
-    c3.segmented_control("Feed", list(CONDITIONS), format_func=CONDITIONS.get, key="w_cond", on_change=sync,
-                         args=("cond",), label_visibility="collapsed",
-                         help="Clean feed = AIS as recorded. The other three are SIMULATED "
-                              "degradations of the same held-out period, for evaluation.")
-    c4.toggle("Countermeasure", key="w_mitig", on_change=sync, args=("mitig",),
-              help="Quality-aware processing: drops spikes and invalid speeds, compensates report age, withholds "
-                   "a verdict or ETA when the input is too old.")
-    c5.toggle("Panel", key="w_panel", on_change=sync, args=("panel",))
-    c6.button("Model evaluation", key=f"{mode}_eval", width="stretch")
+    poisoned = (st.session_state["cond"] or "nominal") != "nominal"
+    with c3.container(horizontal=True, vertical_alignment="center", key=f"poison_{'on' if poisoned else 'off'}"):
+        st.html("<div class='ptag'>Data poisoning test</div>", width="content")
+        st.segmented_control("Feed", list(CONDITIONS), format_func=CONDITIONS.get, key="w_cond", on_change=sync,
+                             args=("cond",), label_visibility="collapsed",
+                             help="Clean feed = AIS as recorded. The other three inject SIMULATED defects into the "
+                                  "same held-out day: reports delivered 5-45 min late (stale), a fast unreliable "
+                                  "source with jitter, position outliers and bad speeds (unreliable), or both.")
+        st.toggle("Countermeasure", key="w_mitig", on_change=sync, args=("mitig",),
+                  help="Quality-aware processing: drops spikes and invalid speeds, compensates report age, and "
+                       "withholds the answer (sends it to a reviewer) when the newest report is over 20 min old.")
     return (st.session_state["area"], st.session_state[f"{mode}_layers"] or [], st.session_state["cond"] or "nominal",
-            st.session_state["mitig"], st.session_state["panel"])
+            st.session_state["mitig"])
+
+
+# ------------------------------------------------------------------------------------------- poisoning
+@st.cache_data
+def degraded_share(cond: str) -> pd.Series | None:
+    """Share of scored vessels whose reports carry a simulated defect, per 30-min step (None on the clean feed)."""
+    if cond == "nominal" or not available("anomaly_windows.parquet"):
+        return None
+    w = windows(cond, "none")
+    return (w.is_stale | w.is_lowq).groupby(w["T"]).mean()
 
 
 # ------------------------------------------------------------------------------------------- map

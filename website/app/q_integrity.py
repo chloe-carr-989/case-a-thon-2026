@@ -6,9 +6,30 @@ import streamlit as st
 
 from common import hhmm, manifest, table, task_status
 
-st.title("Data integrity and reporting gaps")
-st.caption("Checks shared by all four predictions. Each record gets a list of named flags, not one opaque score. "
-           "Raw records are never changed; flags are stored separately.")
+st.markdown("<h2 style='margin:.2rem 0 0'>Data integrity and reporting</h2>", unsafe_allow_html=True)
+st.caption("Two kinds of bad data, kept apart: defects we INJECT to test the models (simulated, labelled per case), "
+           "and problems already present in the real AIS feed (observed, flagged but never changed).")
+
+st.subheader("Injected: the data-poisoning test")
+st.dataframe(pd.DataFrame([
+    {"feed": "Stale reports", "stands for": "a receiver or relay backlog: reports arrive late",
+     "fields affected": "the newest reports of a vessel are withheld; the model sees an older position, speed, course",
+     "severity": "5-45 min late", "how much": "10% → 20% → 30% → 45% → 60% of vessels across the 5 test windows",
+     "source": "AIS feed (same source, delayed)"},
+    {"feed": "Unreliable source", "stands for": "a cheap, fast second feed (e.g. a low-grade aggregator) merged in",
+     "fields affected": "position jitter ~200 m; 25% gross position outliers 3-15 km; speed scaled ×0.3-2.5, missing or "
+                        "102.3 kn sentinel; course random or missing; heading dropped",
+     "severity": "as listed", "how much": "same 10% → 60% schedule, as extra reports (more volume, lower quality)",
+     "source": "SYN-FASTFEED (simulated)"},
+    {"feed": "Stale + unreliable", "stands for": "both at once", "fields affected": "both of the above",
+     "severity": "both", "how much": "both schedules", "source": "both"},
+]), hide_index=True, width="stretch")
+st.caption("Applied in memory to the held-out test day only; the models were trained on clean data and are never "
+           "retrained on degraded data, so the poisoning enters at inference. Raw files are unchanged and every "
+           "injected defect is labelled per case (source, defects, is_stale, is_lowq). The rising 10% → 60% "
+           "schedule over the day is a SIMULATED progression on real chronological windows.")
+
+st.subheader("Observed: problems already in the real feed")
 F, V, G, SY = (table("quality_flags.csv"), table("quality_vessels.parquet"), table("gaps.parquet"),
                table("gap_synthetic_test.csv"))
 if F is None:
