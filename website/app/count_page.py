@@ -69,7 +69,7 @@ def render(task: str, prefix: str, title: str, caption: str, unit_word: str, cou
                            marker=dict(size=np.clip(4 + 14 * np.sqrt(P.pred / vmax), 4, 22), color=P.err,
                                        colorscale="RdBu_r", cmid=0, cmin=-10, cmax=10,
                                        colorbar=dict(title="forecast − observed", thickness=10, len=0.6),
-                                       line=dict(width=0.5, color="white")),
+                                       line=dict(width=0.5, color="#0c0f12")),
                            customdata=P.unit,
                            text=[f"{u} · forecast {p:.1f}, observed later {y:.0f} {count_word} "
                                  f"({1000 * p / a:.2f} per 1000 km²)"
@@ -78,7 +78,7 @@ def render(task: str, prefix: str, title: str, caption: str, unit_word: str, cou
         R = C[~C.shown]
         if len(R):
             fig.add_scattergeo(lat=R.lat, lon=R.lon, mode="markers", name="withheld (late feed)",
-                               marker=dict(size=9, color="rgba(0,0,0,0)", line=dict(width=1.5, color="#666")),
+                               marker=dict(size=9, color="rgba(0,0,0,0)", line=dict(width=1.5, color="#8a95a3")),
                                customdata=R.unit, hoverinfo="skip")
         geo_layout(fig, area)
         ev = st.plotly_chart(fig, width="stretch", on_select="rerun", selection_mode="points", key=f"{prefix}_map")
@@ -125,11 +125,11 @@ def render(task: str, prefix: str, title: str, caption: str, unit_word: str, cou
 
         H = C0[(C0.condition == cond) & (C0.unit == sel)].sort_values("o")
         fig2 = go.Figure()
-        fig2.add_scatter(x=[hhmm(b * bucket_s) for b in H.o], y=H.y, name="observed later", line=dict(color="#222"))
+        fig2.add_scatter(x=[hhmm(b * bucket_s) for b in H.o], y=H.y, name="observed later", line=dict(color="#d6dce4"))
         fig2.add_scatter(x=[hhmm(b * bucket_s) for b in H.o], y=H.pred_un, name="countermeasure off",
                          line=dict(color="#c62828"))
         fig2.add_scatter(x=[hhmm(b * bucket_s) for b in H.o], y=H.pred_mi, name="countermeasure on",
-                         line=dict(color="#1565c0"))
+                         line=dict(color="#49b6dc"))
         fig2.update_layout(height=240, margin=dict(t=10, b=10, l=10, r=10), legend=dict(orientation="h", y=1.2),
                            yaxis_title=count_word)
         st.plotly_chart(fig2, width="stretch")
@@ -150,7 +150,7 @@ def render(task: str, prefix: str, title: str, caption: str, unit_word: str, cou
         W = M[(M.condition == cond) & (M.subgroup == "all") & (M.predictor == "hgb") & (M.window.astype(str) != "all")]
         W = W.assign(window=W.window.astype(int)).groupby(["window", "mitigation"]).mean(numeric_only=True).reset_index()
         fig3 = go.Figure()
-        for mit, name, col in [("none", "countermeasure off", "#c62828"), ("quality_aware", "countermeasure on", "#1565c0")]:
+        for mit, name, col in [("none", "countermeasure off", "#c62828"), ("quality_aware", "countermeasure on", "#49b6dc")]:
             s = W[W.mitigation == mit]
             fig3.add_scatter(x=s.window, y=s.mae, name=name, mode="lines+markers", line=dict(color=col, width=3),
                              text=[f"{c:.0%} answered" for c in s.coverage], hovertemplate="%{y:.2f} · %{text}")

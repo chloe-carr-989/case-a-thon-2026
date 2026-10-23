@@ -24,16 +24,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from aisdp import corruption as C  # noqa: E402
 from aisdp import tasks as T  # noqa: E402
-from aisdp.config import (CODE_VERSION, REPO_ROOT, RESULTS_DIR, SUBSETS, CountConfig,  # noqa: E402
-                          DestinationConfig, ExperimentConfig, QualityConfig)
+from aisdp.config import (CODE_VERSION, REPO_ROOT, RESULTS_DIR, SUBSETS, AnomalyConfig,  # noqa: E402
+                          CountConfig, DestinationConfig, ExperimentConfig, LaneConfig, QualityConfig)
 from aisdp.experiment import InsufficientData, run  # noqa: E402
 from aisdp.ingest import connect, ingest, profile  # noqa: E402
 
-ALL_TASKS = "quality,position_15m,traffic_density,destination,port_occupancy"
+ALL_TASKS = "quality,position_15m,traffic_density,sea_lanes,destination,port_occupancy,anomaly"
 TASK_FILES = ["quality_flags.csv", "quality_vessels.parquet", "gaps.parquet", "gap_synthetic_test.csv",
               "density_cases_seed0.parquet", "density_units.csv", "port_cases_seed0.parquet", "port_units.csv",
               "port_zones.csv", "destination_zones.csv", "destination_cases_seed0.parquet",
-              "destination_confusion.csv"]
+              "destination_confusion.csv", "lanes_cells.parquet", "lanes_nodes.parquet", "lanes_edges.parquet",
+              "vessels.parquet", "anomaly_windows.parquet", "anomaly_synthetic.parquet"]
+
+
+def split_time(con, info, dc: DestinationConfig) -> float:
+    """The destination task's split (10-min bucket range), shared by lanes, ETA and anomaly scoring."""
+    from aisdp.ingest import parquet_glob
+    from aisdp.zones import VESSEL_WHERE
+    b0, b1 = con.execute(f"""SELECT floor(min(epoch(ts)) / {dc.bucket_s}), floor(max(epoch(ts)) / {dc.bucket_s}) + 1
+                             FROM read_parquet('{parquet_glob(info)}', hive_partitioning=true)
+                             WHERE {VESSEL_WHERE}""").fetchall()[0]
+    return b0 * dc.bucket_s + dc.train_time_frac * (b1 - b0) * dc.bucket_s
 
 
 def rel(p) -> str:
@@ -110,6 +121,7 @@ def main(argv=None):
     seeds = tuple(int(s) for s in args.seeds.split(","))
     frac = {"train_time_frac": args.train_frac} if args.train_frac else {}
     qc, cc, dc = QualityConfig(), CountConfig(seeds=seeds, **frac), DestinationConfig(seeds=seeds, **frac)
+    lc, ac = LaneConfig(), AnomalyConfig()
 
     out = Path(args.output)
     (out / "runs").mkdir(parents=True, exist_ok=True)
@@ -156,13 +168,19 @@ def main(argv=None):
             if "traffic_density" in tasks:
                 f, task_meta["traffic_density"] = T.run_counts(con, info, rd, name, "traffic_density", cc, log=log)
                 frames.append(f)
-            port_zones = None
+            port_zones, lanes, split_t = None, None, split_time(con, info, dc)
+            if "sea_lanes" in tasks or "anomaly" in tasks:
+                lanes, task_meta["sea_lanes"] = T.run_lanes(con, info, rd, srcs, split_t, cfg, lc, log)
             if "destination" in tasks or "port_occupancy" in tasks:
-                f, task_meta["destination"], port_zones = T.run_destination(con, info, rd, name, dc, cfg, cc, log)
+                f, task_meta["destination"], port_zones = T.run_destination(con, info, rd, name, dc, cfg, cc, log,
+                                                                            lanes=lanes)
                 frames.append(f)
             if "port_occupancy" in tasks:
                 f, task_meta["port_occupancy"] = T.run_counts(con, info, rd, name, "port_occupancy", cc,
                                                               zones=port_zones, log=log)
+                frames.append(f)
+            if "anomaly" in tasks and lanes is not None:
+                f, task_meta["anomaly"] = T.run_anomaly(con, rd, lanes, split_t, cfg, lc, ac, log)
                 frames.append(f)
             for t, m in task_meta.items():
                 row[f"{t}_status"], row[f"{t}_s"] = m.get("status"), m.get("seconds")
@@ -176,13 +194,22 @@ def main(argv=None):
         total = time.perf_counter() - t0
         other = pd.concat([f for f in frames if f is not None], ignore_index=True) if any(
             f is not None for f in frames) else pd.DataFrame()
-        if res is None:
+        if res is None:     # partial run (no position task): merge into this subset's earlier results
             if len(other):
-                other.assign(subset=name).to_csv(rd / "metrics.csv", index=False)
-            (rd / "run.json").write_text(json.dumps({"subset": name, "profile": prof, "ingest": info,
-                                                     "tasks": task_meta}, indent=1, default=str))
+                other = other.assign(subset=name)
+                if (rd / "metrics.csv").exists():
+                    prev = pd.read_csv(rd / "metrics.csv", low_memory=False)
+                    other = pd.concat([prev[~prev.task.isin(other.task.unique())], other], ignore_index=True)
+                other.to_csv(rd / "metrics.csv", index=False)
+            rj = rd / "run.json"
+            meta = json.loads(rj.read_text()) if rj.exists() else {"subset": name, "profile": prof, "ingest": info}
+            meta.setdefault("tasks", {}).update(task_meta)
+            rj.write_text(json.dumps(meta, indent=1, default=str))
             row.update(total_s=round(total, 2))
             bench.append(row)
+            mp = out / "manifest.json"
+            if mp.exists() and json.loads(mp.read_text()).get("default_demo_subset") == name:
+                update_default(out, rd, meta)
             continue
         m = pd.concat([res["metrics"].assign(task="position_15m"), other], ignore_index=True).assign(subset=name)
         m.to_csv(rd / "metrics.csv", index=False)
@@ -265,12 +292,56 @@ def task_manifest(tm: dict) -> dict:
                      "before split_t, test decisions after it with >= 45 min of history)",
             "not_claimed": "named ports, verified berth calls, cargo delivery, declared AIS destination",
             "run": tm.get("destination")},
+        "sea_lanes": {
+            "definition": "per category group (cargo, tanker, passenger, tug/service; all other non-pleasure "
+                          "categories pooled as 'commercial') and 0.01 deg cell: distinct moving vessels, course "
+                          "histogram (8 sectors), speed quartiles and stop share from one fix per vessel-minute. Lane "
+                          "cell = moving traffic in the cell and >= 3 distinct moving vessels in its 0.03 deg block. "
+                          "Learned only from training-period reports of non-test vessels; pleasure craft excluded.",
+            "routing": "graph over pooled lane cells: 8-neighbour edges plus cell-to-cell transitions one vessel "
+                       "made within 15 min (<= 15 km); expected routes are shortest paths on that graph, never "
+                       "straight lines; positions > 10 km from a lane have no expected route",
+            "run": tm.get("sea_lanes")},
+        "eta": {
+            "question": "When will this vessel arrive?",
+            "arrival_proxy": "start of the next >= 30-min dwell (< 1 kn) in an inferred arrival zone within 6 h "
+                             "(the destination label); not a verified berth call and not the start or end of "
+                             "unloading",
+            "model": "HistGradientBoostingRegressor (absolute error) + 10% / 90% quantile models on lane route "
+                     "distance to the ranker's top zone, straight-line distance, speed, lane speed, course vs "
+                     "bearing, vessel type, hour, zone activity; conditional on the predicted zone",
+            "baseline": "straight-line distance / reported speed to the same zone",
+            "run": (tm.get("destination") or {}).get("eta")},
+        "anomaly": {
+            "question": "Which vessels move unusually relative to learned lanes?",
+            "unit": "vessel-window: fixes in the 60 min up to T, every 30 min; only fixes observed by T",
+            "score": "component percentiles (current off-lane distance, wrong-way share, speed deviation, unusual "
+                     "stops) vs calibration windows of the same category, tails summed and ranked again; "
+                     "calibration = the 48 h before the split, test-hash vessels the lanes never saw. "
+                     ">= 97.5 unusual, >= 99.5 high deviation: movement relative to history, NOT threat or intent",
+            "labels_available": "none for real anomalies; known-label check = synthetic 2-8 km lateral drifts "
+                                "injected into windows normal on the clean feed",
+            "run": tm.get("anomaly")},
         "stress_tests": "same SIMULATED feed-degradation design as the position task: nominal / stale / low quality / "
                         "combined x mitigation off/on, on identical test cases and unmodified targets, frozen models, "
                         "seeds as configured. Counts: stale = latest 15-60 min of buckets not yet delivered; low quality "
                         "= SYN-FASTFEED ghost IDs (invalid, transient, persistent), tripled messages, omissions. "
                         "Destination: the position task's stale states and SYN-FASTFEED record defects.",
     }
+
+
+def update_default(out: Path, rd: Path, meta: dict):
+    """After a partial run of the default subset: refresh its copies in results/ and the manifest task entries."""
+    import shutil
+    shutil.copy(rd / "metrics.csv", out / "metrics.csv")
+    for f in TASK_FILES:
+        if (rd / f).exists():
+            shutil.copy(rd / f, out / f)
+    man = json.loads((out / "manifest.json").read_text())
+    man["tasks"] = task_manifest(meta.get("tasks", {}))
+    man["partial_update_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    (out / "manifest.json").write_text(json.dumps(man, indent=1, default=str))
+    print(f"updated default results in {out} from {rd}")
 
 
 def write_outputs(out: Path, last, cfg: ExperimentConfig, args):

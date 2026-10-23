@@ -37,7 +37,7 @@ with c2:
     if G is not None and len(G):
         fig = go.Figure()
         for cls, col in [("stationary_reporting_gap", "#7a9cc6"), ("underway_reporting_gap", "#c62828"),
-                         ("possible_coverage_exit", "#999")]:
+                         ("possible_coverage_exit", "#56606d")]:
             s = G[G.gap_class == cls]
             fig.add_histogram(x=np.clip(s.gap_s / 60, 0, 240), name=f"{cls.replace('_', ' ')} ({len(s):,})",
                               marker_color=col, xbins=dict(start=0, end=240, size=10))

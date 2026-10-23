@@ -1,0 +1,27 @@
+# Dark operations-console theme (palette and type follow the teammate's data_vis/ viewer).
+[theme]
+base = "dark"
+primaryColor = "#49b6dc"
+backgroundColor = "#0c0f12"
+secondaryBackgroundColor = "#12161b"
+textColor = "#d6dce4"
+borderColor = "#262d36"
+dataframeBorderColor = "#262d36"
+dataframeHeaderBackgroundColor = "#12161b"
+linkColor = "#49b6dc"
+font = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap, sans-serif"
+codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap, monospace"
+baseFontSize = 14
+baseRadius = "small"
+headingFontWeights = [600, 600, 500, 500, 500, 500]
+metricValueFontSize = "1.6rem"
+metricValueFontWeight = 500
+showWidgetBorder = true
+chartCategoricalColors = ["#49b6dc", "#e9b44c", "#e2574c", "#8a95a3", "#6fd0c5", "#c07be0"]
+
+[client]
+toolbarMode = "minimal"
+
+[server]
+headless = true
+enableStaticServing = true

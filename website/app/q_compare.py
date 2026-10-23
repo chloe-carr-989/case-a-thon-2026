@@ -19,7 +19,7 @@ if all(errors(t).empty for t in TASKS):
     st.warning("No results yet. Run `.venv\\Scripts\\python scripts\\run_pipeline.py`.")
     st.stop()
 
-OFF, ON = "#c62828", "#1565c0"
+OFF, ON = "#c62828", "#49b6dc"
 BASE_COLORS = ["#616161", "#9e9e9e", "#c8c8c8"]
 LOGY = dict(type="log", tickformat="~g")
 
@@ -221,7 +221,7 @@ with tab_pick:
         fig.add_scatter(x=s.age_min, y=s.baseline, mode="lines", name=f"{TASKS[t]['short']} · baseline",
                         line=dict(color=col, width=1.5, dash="dot"), customdata=s.n,
                         hovertemplate="%{x:.0f} min old · %{y:.2f}× clean · n=%{customdata:,}<extra></extra>")
-    fig.add_hline(y=1, line_color="#999", line_width=1)
+    fig.add_hline(y=1, line_color="#56606d", line_width=1)
     fig.update_layout(height=420, margin=dict(t=10, b=10), yaxis=dict(title="error × same case on clean feed", **LOGY),
                       xaxis_title="age of the newest delivered input (min)", legend=dict(orientation="h", y=-0.2))
     st.plotly_chart(fig, width="stretch")
@@ -244,7 +244,7 @@ with tab_pick:
                     fig.add_bar(y=s.defect, x=s[col], orientation="h", marker_color=color,
                                 marker_pattern_shape=dash, name=f"{TASKS[t]['short']} · {name}",
                                 customdata=s.n, hovertemplate="%{y}<br>%{x:.2f}× clean · n=%{customdata:,}<extra></extra>")
-            fig.add_vline(x=1, line_color="#999", line_width=1)
+            fig.add_vline(x=1, line_color="#56606d", line_width=1)
             fig.update_layout(barmode="group", height=520, margin=dict(t=10, b=10),
                               xaxis=dict(title="error × same case on clean feed", **LOGY),
                               legend=dict(orientation="h", y=-0.15))
@@ -261,7 +261,7 @@ with tab_pick:
                 fig.add_scatter(x=s.extra_ids, y=s.model, mode="lines+markers", name=TASKS[t]["short"],
                                 line=dict(color=TASKS[t]["color"], width=3), customdata=s.n,
                                 hovertemplate="%{x} extra IDs · %{y:.1f}× clean · n=%{customdata:,}<extra></extra>")
-            fig.add_hline(y=1, line_color="#999", line_width=1)
+            fig.add_hline(y=1, line_color="#56606d", line_width=1)
             fig.update_layout(height=520, margin=dict(t=10, b=10), yaxis=dict(title="error × clean feed", **LOGY),
                               xaxis_title="extra vessel IDs the unreliable source added to the last hour",
                               legend=dict(orientation="h", y=-0.15))
@@ -282,7 +282,7 @@ with tab_pick:
                             mode="lines+markers", name=TASKS[t]["short"], legendgroup=t, showlegend=j == 0,
                             line=dict(color=TASKS[t]["color"], width=3),
                             hovertemplate="%{x:.0%} corrupted · %{y:.2f}× clean<extra></extra>", row=1, col=j + 1)
-        fig.add_hline(y=1, line_color="#999", line_width=1, row=1, col=j + 1)
+        fig.add_hline(y=1, line_color="#56606d", line_width=1, row=1, col=j + 1)
     fig.update_yaxes(**LOGY)
     fig.update_yaxes(title_text="model error × clean feed (same window)", row=1, col=1)
     fig.update_xaxes(tickformat=".0%", title_text="corrupted share in window")
@@ -320,11 +320,11 @@ with tab_pick:
                     continue
                 h = H[t][c]
                 fig.add_scatter(x=[h["coverage_on"]], y=[h["recovered"]], mode="markers",
-                                marker=dict(symbol=s, size=15, color=TASKS[t]["color"], line=dict(width=1, color="white")),
+                                marker=dict(symbol=s, size=15, color=TASKS[t]["color"], line=dict(width=1, color="#0c0f12")),
                                 name=f"{TASKS[t]['short']} · {STRESS.get(c, 'unseen defect (holdout)')}",
                                 hovertemplate=f"{TASKS[t]['short']} · {STRESS.get(c, 'unseen defect')}<br>"
                                               "%{x:.0%} answered · %{y:.0%} of the loss recovered<extra></extra>")
-        fig.add_hline(y=0, line_color="#999", line_width=1)
+        fig.add_hline(y=0, line_color="#56606d", line_width=1)
         fig.update_layout(height=430, margin=dict(t=10, b=10), xaxis=dict(title="share of cases answered", tickformat=".0%"),
                           yaxis=dict(title="share of the poisoning loss recovered", tickformat=".0%"),
                           legend=dict(font=dict(size=10)))

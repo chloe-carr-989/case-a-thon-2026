@@ -21,6 +21,7 @@ SUBSETS = {
     "subset1": SUBSETS_DIR / "jan_01_subset_1.csv",
     "full": DAYS_DIR / "ais-2026-01-01.csv",
     "jan01_02": [DAYS_DIR / "ais-2026-01-01.csv", DAYS_DIR / "ais-2026-01-02.csv"],
+    "jan01_04": [DAYS_DIR / f"ais-2026-01-0{d}.csv" for d in range(1, 5)],
 }
 
 # (lon_min, lat_min, lon_max, lat_max)
@@ -117,6 +118,59 @@ class CountConfig:
     port_min_vessels: int = 10          # train-period distinct dwelling vessels to define a port/anchorage study zone
     port_max_zones: int = 60
     max_train_rows: int = 300_000
+
+
+@dataclass
+class LaneConfig:
+    """Learned sea lanes: per-category traffic grid + a routing graph over the pooled commercial lanes."""
+    cell_deg: float = 0.01              # ~1.1 km cells for lanes, scoring and routing
+    coarse_deg: float = 0.1             # display aggregate for whole-country views
+    moving_min_sog_kn: float = 2.0
+    stop_max_sog_kn: float = 0.5
+    lane_min_vessels: int = 3           # a lane cell = moving traffic in the cell and >= 3 distinct moving
+    block_deg: float = 0.03             # vessels in its ~3 km block during the training period
+    min_cell_moving: int = 10           # direction/speed statistics need >= 10 moving vessel-minutes in the cell
+    groups: tuple = ("cargo", "tanker", "passenger", "tug_service")   # own lanes; everything else -> pooled
+    edge_max_km: float = 15.0           # trajectory transitions between lane cells become graph edges ...
+    edge_max_gap_s: int = 900           # ... when consecutive fixes are <= 15 min apart
+    own_lane_max_km: float = 20.0       # anomaly scoring falls back to pooled lanes beyond this
+    snap_max_km: float = 10.0           # a position further than this from any lane has no expected route
+    route_limit_km: float = 800.0
+
+
+@dataclass
+class AnomalyConfig:
+    """Movement anomaly scoring relative to learned lanes (Government mode). Thresholds fixed a priori."""
+    calib_s: int = 2 * 86400            # calibration windows: the last 48 h before the split
+    step_s: int = 1800                  # one scored vessel-window every 30 min ...
+    window_s: int = 3600                # ... over the previous 60 min of reports
+    recent_s: int = 600                 # off-lane distance uses the newest 10 min of the window
+    lane_far_km: float = 2.0
+    coverage_km: float = 20.0           # off-lane distance only counts within 20 km of any learned traffic
+    wrongway_support: float = 0.10      # < 10% of the cell's traffic moves within +/-45 deg of this course
+    unusual_stop_share: float = 0.05    # stopped where < 5% of the cell's training reports are stops
+    # off-lane carries the score; the noisier components add supporting evidence. Chosen on a vessel-disjoint
+    # split of the calibration period (sum of all four at weight 1: 21% injected-drift recall; these: 63%).
+    weights: tuple = (("off_lane", 1.0), ("wrong_way", 0.25), ("speed", 0.25), ("stop", 0.25))
+    unusual_pct: float = 97.5           # score percentile vs the same category's calibration windows
+    high_pct: float = 99.5
+    min_calib_windows: int = 500        # smaller categories are calibrated against the pooled set
+    spike_speed_kn: float = 60.0        # countermeasure: a fix implying > 60 kn both in and out is a spike
+    spike_min_km: float = 1.0
+    max_valid_sog_kn: float = 40.0
+    stale_hold_s: int = 1200            # countermeasure: newest report older than 20 min -> no movement verdict
+    stale_flag_s: int = 600
+    gap_flag_s: int = 900
+    # SIMULATED degradation, per chronological test window (same schedule as the other tasks)
+    stale_schedule: tuple = (0.10, 0.20, 0.30, 0.45, 0.60)
+    stale_delay_min_s: int = 300
+    stale_delay_max_s: int = 2700
+    lowq_schedule: tuple = (0.10, 0.20, 0.30, 0.45, 0.60)
+    lowq_point_share: float = 0.5       # in an affected window the faulty source adds one record per two real ones
+    synth_windows: int = 3000           # injected route deviations with known labels
+    synth_offset_km: tuple = (2.0, 8.0)
+    n_windows: int = 5
+    seed: int = 0
 
 
 @dataclass

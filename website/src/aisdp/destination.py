@@ -164,7 +164,8 @@ def _score(model, cand):
     return cand.assign(p=model.predict_proba(cand[CAND_FEATURES])[:, 1], pb=baseline_score(cand))
 
 
-def run(con, info: dict, dc: DestinationConfig, ecfg: ExperimentConfig, log=print, port_zone_args=None) -> dict:
+def run(con, info: dict, dc: DestinationConfig, ecfg: ExperimentConfig, log=print, port_zone_args=None,
+        lanes=None) -> dict:
     t_all = time.perf_counter()
     nb = build_vessel_buckets(con, info, dc.bucket_s)
     dw = dwell_events(con, dc)
@@ -218,6 +219,12 @@ def run(con, info: dict, dc: DestinationConfig, ecfg: ExperimentConfig, log=prin
                                            l2_regularization=1.0, random_state=0).fit(ctr[CAND_FEATURES], ctr.y)
     train_s = time.perf_counter() - t0
     log(f"destination: trained on {len(trl)} cases / {len(ctr)} candidate rows ({train_s:.1f}s)")
+    eta_models = None
+    if lanes is not None:                # ETA along learned lanes, trained on the same clean training decisions
+        from . import eta as E
+        eta_models = E.fit(trl, zones, lanes)
+        log(f"eta: trained on {eta_models['info']['n_train']} decisions "
+            f"(lane route found for {eta_models['info']['route_found_share']:.0%})")
     te = lab[lab.split == "test"]
     # a stale (delayed) state must exist: same >= 45 min history rule as the position task
     first = con.execute("SELECT mmsi, min(t) AS first_t FROM r GROUP BY mmsi").df().set_index("mmsi").first_t
@@ -258,6 +265,8 @@ def run(con, info: dict, dc: DestinationConfig, ecfg: ExperimentConfig, log=prin
             f["in_lat"], f["in_lon"], f["in_sog"], f["in_cog"] = s.lat.to_numpy(), s.lon.to_numpy(), s.sog.to_numpy(), s.cog.to_numpy()
             f["age_s"] = dec_t - s.state_t.to_numpy(float)
             f["source"], f["defects"] = s.source.to_numpy(), s.defects.to_numpy()
+            f["vessel_type"] = s.vessel_type.to_numpy(float)
+            f["mi_lat"], f["mi_lon"], f["mi_sog"], f["mi_cog"] = z["lat"], z["lon"], z["sog"], z["cog"]
             for tag, r in [("un", ru), ("bl", rb), ("mi", rm)]:
                 r = r.reindex(f.case_id)
                 for k in ["pred1", "pred2", "pred3", "top_score"]:
@@ -275,6 +284,10 @@ def run(con, info: dict, dc: DestinationConfig, ecfg: ExperimentConfig, log=prin
             frames.append(f)
     cases = pd.concat(frames, ignore_index=True)
     metrics = summarize(cases, zones)
+    if eta_models is not None:
+        cases = E.add_eta(cases, eta_models, zones, lanes)
+        eta_metrics, eta_penalty = E.summarize(cases)
+        base.update(eta_metrics=eta_metrics, eta_models=eta_models, eta_defer_penalty_h=eta_penalty)
     conf = confusion(cases[(cases.condition == "nominal") & (cases.seed == dc.seeds[0])])
     base.update(cases=cases, metrics=metrics, confusion=conf, model=model, n_train_candidate_rows=int(len(ctr)),
                 train_seconds=round(train_s, 2), n_test_scored=int(len(te)), n_test_vessels=int(te.mmsi.nunique()),

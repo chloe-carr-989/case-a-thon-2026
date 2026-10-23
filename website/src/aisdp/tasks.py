@@ -14,7 +14,8 @@ import pandas as pd
 from . import counts as K
 from . import destination as Dn
 from . import quality as Q
-from .config import CACHE_DIR, CountConfig, DestinationConfig, ExperimentConfig, QualityConfig
+from .config import (AnomalyConfig, CACHE_DIR, CountConfig, DestinationConfig, ExperimentConfig, LaneConfig,
+                     QualityConfig)
 
 
 def _save_model(model, subset: str, task: str) -> str:
@@ -79,12 +80,12 @@ def run_counts(con, info: dict, rd: Path, subset: str, task: str, cc: CountConfi
 
 
 def run_destination(con, info: dict, rd: Path, subset: str, dc: DestinationConfig, ecfg: ExperimentConfig,
-                    cc: CountConfig, log=print):
+                    cc: CountConfig, log=print, lanes=None):
     t0 = time.perf_counter()
     pz = {"deg": cc.port_zone_deg, "min_vessels": cc.port_min_vessels, "max_zones": cc.port_max_zones,
           "kind": "port/anchorage study zone (inferred from dwells)"}
     try:
-        res = Dn.run(con, info, dc, ecfg, log=log, port_zone_args=pz)
+        res = Dn.run(con, info, dc, ecfg, log=log, port_zone_args=pz, lanes=lanes)
     except Dn.InsufficientDestination as e:
         info_ = e.info
         meta = {"status": "insufficient_data", "reason": str(e), "seconds": round(time.perf_counter() - t0, 2),
@@ -102,4 +103,73 @@ def run_destination(con, info: dict, rd: Path, subset: str, dc: DestinationConfi
     meta = {k: res[k] for k in keys}
     meta.update(status="completed", features=Dn.CAND_FEATURES, config=asdict(dc),
                 model_path=_save_model(res["model"], subset, "destination"))
-    return res["metrics"], meta, res["port_zones"]
+    metrics = res["metrics"]
+    if "eta_models" in res:
+        em = res["eta_models"]
+        meta["eta"] = {"status": "completed", **em["info"], "defer_penalty_h": res["eta_defer_penalty_h"],
+                       "model_path": _save_model({k: v for k, v in em.items() if k != "info"}, subset, "eta")}
+        metrics = pd.concat([metrics, res["eta_metrics"]], ignore_index=True)
+    elif lanes is None:
+        meta["eta"] = {"status": "skipped", "reason": "sea lanes unavailable for this subset"}
+    return metrics, meta, res["port_zones"]
+
+
+def vessel_registry(con, srcs: list[Path]) -> pd.DataFrame:
+    """Self-reported identity per MMSI (latest non-null value). AIS identity fields are not verified."""
+    from .ingest import csv_source
+    return con.execute(f"""
+        SELECT mmsi, arg_max(vessel_name, base_date_time) FILTER (vessel_name IS NOT NULL) AS name,
+               arg_max(imo, base_date_time) FILTER (imo IS NOT NULL) AS imo,
+               arg_max(call_sign, base_date_time) FILTER (call_sign IS NOT NULL) AS call_sign,
+               mode(vessel_type) AS vessel_type, max(length) AS length, max(draft) AS draft
+        FROM {csv_source(srcs)} WHERE mmsi BETWEEN 100000000 AND 999999999 GROUP BY mmsi
+    """).df()
+
+
+def run_lanes(con, info: dict, rd: Path, srcs: list[Path], split_t: float, ecfg: ExperimentConfig,
+              lc: LaneConfig, log=print):
+    from . import lanes as L
+    t0 = time.perf_counter()
+    n_vm = L.build_vessel_minutes(con, info)
+    try:
+        res = L.learn(con, info, split_t, ecfg, lc, log=log)
+    except L.InsufficientLanes as e:
+        return None, {"status": "insufficient_data", "reason": str(e), "seconds": round(time.perf_counter() - t0, 2)}
+    L.save(res, rd)
+    vessel_registry(con, srcs).to_parquet(rd / "vessels.parquet", index=False)
+    c = res["cells"]
+    meta = {"status": "completed", "n_vessel_minutes": int(n_vm), "split_t": split_t,
+            "n_train_vessel_minutes": res["n_train_vessel_minutes"], "n_train_vessels": res["n_train_vessels"],
+            "lane_cells": {g: int(c[(c.res == "fine") & (c.g == g) & c.lane].shape[0]) for g in c.g.unique()},
+            "graph_nodes": int(len(res["nodes"])), "graph_edges": int(len(res["edges"])), "config": asdict(lc),
+            "seconds": round(time.perf_counter() - t0, 2)}
+    return L.LaneModel.from_result(res, lc), meta
+
+
+WINDOW_COLS = {"float32": ["lat", "lon", "sog", "cog", "score", "p_off_lane", "p_wrong_way", "p_speed", "p_stop",
+                           "off_lane", "wrong_way", "speed", "stop", "age_s", "max_gap_s", "uncovered"],
+               "int16": ["n_pts", "n_moving", "n_spike", "n_invalid", "window"]}
+
+
+def run_anomaly(con, rd: Path, lanes, split_t: float, ecfg: ExperimentConfig, lc: LaneConfig, ac: AnomalyConfig,
+                log=print):
+    from . import anomaly as A
+    t0 = time.perf_counter()
+    try:
+        res = A.run(con, lanes, split_t, ecfg, lc, ac, log=log)
+    except A.InsufficientAnomaly as e:
+        return None, {"status": "insufficient_data", "reason": str(e), "seconds": round(time.perf_counter() - t0, 2)}
+    W = res["windows"]
+    keep = ["condition", "mitigation", "mmsi", "T", "category", "label", "reasons", "is_stale", "is_lowq", "last_t",
+            *WINDOW_COLS["float32"], *WINDOW_COLS["int16"]]
+    W = W[keep].copy()
+    for dt, cols in WINDOW_COLS.items():
+        W[cols] = W[cols].fillna(-1 if dt == "int16" else np.nan).astype(dt)
+    for c in ["condition", "mitigation", "category", "label"]:
+        W[c] = W[c].astype("category")
+    W.to_parquet(rd / "anomaly_windows.parquet", index=False)
+    res["synthetic"].to_parquet(rd / "anomaly_synthetic.parquet", index=False)
+    meta = {"status": "completed", **{k: res[k] for k in ["n_test_windows", "n_test_vessels", "n_calibration_windows",
+                                                         "window_edges_t", "calibration", "seconds"]},
+            "config": asdict(ac)}
+    return res["metrics"], meta

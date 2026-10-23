@@ -1,8 +1,8 @@
 {
- "generated_utc": "2026-10-22T22:36:42+00:00",
- "default_demo_subset": "jan01_02",
+ "generated_utc": "2026-10-23T00:49:55+00:00",
+ "default_demo_subset": "jan01_04",
  "dataset": {
-  "name": "MarineCadastre / NOAA AIS vessel traffic, broadcast-point CSV, 2026-01-01 to 2026-01-02",
+  "name": "MarineCadastre / NOAA AIS vessel traffic, broadcast-point CSV, 2026-01-01 to 2026-01-04",
   "source_hub_url": "https://hub.marinecadastre.gov/pages/vesseltraffic (per case prompt; not re-verified offline)",
   "product": "daily CSV (compressed .csv.zst present locally); not the GeoParquet product",
   "retrieval_date": "unknown (local file mtime of .zst: 2026-10-18; organizer-provided subsets)",
@@ -30,21 +30,31 @@
    "jan01_02": {
     "path": "data/dataset3/marine_2026-01/ais-2026-01-01.csv;data/dataset3/marine_2026-01/ais-2026-01-02.csv",
     "bytes": 1648183885
+   },
+   "jan01_04": {
+    "path": "data/dataset3/marine_2026-01/ais-2026-01-01.csv;data/dataset3/marine_2026-01/ais-2026-01-02.csv;data/dataset3/marine_2026-01/ais-2026-01-03.csv;data/dataset3/marine_2026-01/ais-2026-01-04.csv",
+    "bytes": 3344827187
    }
   },
   "files_used": [
    "data/dataset3/marine_2026-01/ais-2026-01-01.csv",
-   "data/dataset3/marine_2026-01/ais-2026-01-02.csv"
+   "data/dataset3/marine_2026-01/ais-2026-01-02.csv",
+   "data/dataset3/marine_2026-01/ais-2026-01-03.csv",
+   "data/dataset3/marine_2026-01/ais-2026-01-04.csv"
   ],
   "fingerprint": {
    "path": [
     "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\data\\dataset3\\marine_2026-01\\ais-2026-01-01.csv",
-    "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\data\\dataset3\\marine_2026-01\\ais-2026-01-02.csv"
+    "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\data\\dataset3\\marine_2026-01\\ais-2026-01-02.csv",
+    "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\data\\dataset3\\marine_2026-01\\ais-2026-01-03.csv",
+    "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\data\\dataset3\\marine_2026-01\\ais-2026-01-04.csv"
    ],
-   "bytes": 1648183885,
+   "bytes": 3344827187,
    "hash": [
     "1d8cdaad7ad3051d632eecc2d7def37299c2b175851517af73c127f48353d1a1",
-    "c099d7484507f71431661df688f85a849e5a1241d30eec25061978470ff67091"
+    "c099d7484507f71431661df688f85a849e5a1241d30eec25061978470ff67091",
+    "ae2e05c4be3209cd2b664fcf04e1e2fd508ee332d54e11d3828fe2338df14ca7",
+    "0d21bbded10dcd8b60379758eceb1261a5596bbbd94d02ce7da073f66cfb4227"
    ],
    "files": [
     {
@@ -60,33 +70,47 @@
      "mtime": 1792707943.2789333,
      "hash": "c099d7484507f71431661df688f85a849e5a1241d30eec25061978470ff67091",
      "hash_mode": "sha256_full"
+    },
+    {
+     "path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\data\\dataset3\\marine_2026-01\\ais-2026-01-03.csv",
+     "bytes": 858612299,
+     "mtime": 1792707981.9463625,
+     "hash": "ae2e05c4be3209cd2b664fcf04e1e2fd508ee332d54e11d3828fe2338df14ca7",
+     "hash_mode": "sha256_full"
+    },
+    {
+     "path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\data\\dataset3\\marine_2026-01\\ais-2026-01-04.csv",
+     "bytes": 838031003,
+     "mtime": 1792707998.3443985,
+     "hash": "0d21bbded10dcd8b60379758eceb1261a5596bbbd94d02ce7da073f66cfb4227",
+     "hash_mode": "sha256_full"
     }
    ]
   },
   "subset_rules": "Organizer subsets are byte-identical head-prefixes of ais-2026-01-01.csv (verified with cmp); never combined with each other. jan01_02 = the Jan 1 and Jan 2 daily files ingested together (day-partitioned). Region filter: all; deterministic vessel sample of 4000 MMSIs by hash key.",
   "profile_observed": {
-   "rows": 16158949,
-   "vessels": 19231,
+   "rows": 32762210,
+   "vessels": 21742,
    "time_min": "2026-01-01 00:00:00",
-   "time_max": "2026-01-02 23:59:59",
-   "lat_min": 1.30646,
-   "lat_max": 85.71106,
+   "time_max": "2026-01-04 23:59:59",
+   "lat_min": 0.46595,
+   "lat_max": 89.65724,
    "lon_min": -178.34985,
    "lon_max": 167.87544,
-   "null_rate_sog": 0.0023158065540029864,
-   "null_rate_cog": 0.177902411846216,
-   "null_rate_heading": 0.49475136037622247,
-   "null_rate_vessel_type": 0.006076013978384361,
+   "null_rate_sog": 0.0022044300430282327,
+   "null_rate_cog": 0.17616543572610027,
+   "null_rate_heading": 0.4916767214421738,
+   "null_rate_vessel_type": 0.0059948947277976665,
    "sentinel_sog_102_3": 0,
    "sentinel_cog_ge_360": 0,
    "sentinel_heading_511": 0,
    "invalid_lat_lon": 0,
    "null_island_0_0": 0,
-   "sog_over_40kn_not_sentinel": 684,
-   "duplicate_mmsi_timestamp_rows": 2656,
+   "sog_over_40kn_not_sentinel": 1748,
+   "duplicate_mmsi_timestamp_rows": 5783,
    "transceiver_class_counts": {
-    "A": 11502041,
-    "B": 4656908
+    "A": 23381603,
+    "B": 9380607
    }
   },
   "units": {
@@ -107,26 +131,26 @@
  },
  "split": {
   "rule": "vessel-disjoint (hash(mmsi)%10<3 -> test) AND chronological: train targets end before split_t; test decisions start at split_t + horizon and need >=45 min of vessel history",
-  "split_t_utc": "2026-01-01 23:59:59.500000",
+  "split_t_utc": "2026-01-03 23:59:59.250000",
   "window_edges_utc": [
-   "2026-01-02 00:15:00",
-   "2026-01-02 04:57:04.200000286",
-   "2026-01-02 09:39:08.400000334",
-   "2026-01-02 14:21:12.600000620",
-   "2026-01-02 19:03:16.800000668",
-   "2026-01-02 23:45:21.000000954"
+   "2026-01-04 00:15:14",
+   "2026-01-04 04:57:20.600000143",
+   "2026-01-04 09:39:27.200000286",
+   "2026-01-04 14:21:33.800000668",
+   "2026-01-04 19:03:40.400000811",
+   "2026-01-04 23:45:47.000000954"
   ],
   "holdout": "window 4 (latest period) plus the 'holdout_unseen_bias' defect type not used when designing the countermeasure",
-  "n_train_cases": 217560,
-  "n_test_cases": 93015,
-  "n_test_vessels": 992
+  "n_train_cases": 577509,
+  "n_test_cases": 84271,
+  "n_test_vessels": 886
  },
  "model": {
   "type": "2x HistGradientBoostingRegressor (absolute_error) predicting mean east/north velocity",
   "retraining": "trained once on nominal data; NOT retrained during the degradation progression",
   "train_rows": 200000,
-  "train_vessels": 2289,
-  "train_seconds": 5.8,
+  "train_vessels": 2391,
+  "train_seconds": 8.64,
   "features": [
    "sog",
    "cog_sin",
@@ -182,7 +206,7 @@
   "max_age_defer_s": 1200,
   "max_valid_sog_kn": 40.0,
   "defer_quality": 0.35,
-  "defer_penalty_km": 0.36133829206526247,
+  "defer_penalty_km": 0.30327992164726775,
   "defer_penalty_rule": "p90 of nominal unmitigated error, charged per deferred case in policy_cost_km so that abstaining on everything cannot win"
  },
  "config": {
@@ -193,7 +217,7 @@
   "prev_gap_min_s": 60,
   "prev_gap_max_s": 900,
   "sample_vessels": 4000,
-  "train_time_frac": 0.5,
+  "train_time_frac": 0.75,
   "test_vessel_mod": 10,
   "test_vessel_cut": 3,
   "max_train_rows": 200000,
@@ -247,42 +271,42 @@
    "run": {
     "status": "completed",
     "flags": {
-     "rows": 16158949,
-     "rows_flagged": 14040,
+     "rows": 32762210,
+     "rows_flagged": 28165,
      "by_code": {
       "mmsi_malformed": 0,
-      "mmsi_non_vessel_mid": 7199,
+      "mmsi_non_vessel_mid": 15079,
       "ts_missing": 0,
       "coord_missing": 0,
       "coord_out_of_range": 0,
       "null_island": 0,
       "sog_sentinel": 0,
       "sog_invalid": 0,
-      "sog_implausible": 100,
+      "sog_implausible": 348,
       "cog_sentinel": 0,
       "cog_invalid": 0,
       "heading_sentinel": 0,
       "heading_invalid": 0,
-      "exact_duplicate": 2654,
-      "ts_conflict": 4,
+      "exact_duplicate": 5772,
+      "ts_conflict": 20,
       "high_rate": 0,
-      "implausible_jump": 4601
+      "implausible_jump": 8079
      },
-     "seconds": 33.39
+     "seconds": 87.77
     },
     "gaps": {
-     "n_gaps": 66677,
-     "n_vessels_with_gaps": 10568,
-     "median_gap_min": 23.316666666666666,
-     "p90_gap_min": 140.7566666666667,
+     "n_gaps": 143884,
+     "n_vessels_with_gaps": 14917,
+     "median_gap_min": 23.816666666666666,
+     "p90_gap_min": 162.05,
      "by_class": {
-      "stationary_reporting_gap": 49822,
-      "underway_reporting_gap": 14047,
-      "possible_coverage_exit": 2808
+      "stationary_reporting_gap": 110456,
+      "underway_reporting_gap": 29562,
+      "possible_coverage_exit": 3866
      },
      "t_first": 1767225600.0,
-     "t_last": 1767398399.0,
-     "seconds": 5.41,
+     "t_last": 1767571199.0,
+     "seconds": 16.15,
      "config": {
       "high_rate_per_min": 4,
       "implied_speed_max_kn": 60.0,
@@ -300,20 +324,20 @@
     "synthetic_gap_test": {
      "delayed": {
       "n_injected": 200,
-      "n_should_detect": 182,
-      "realtime_recall": 0.9615384615384616,
+      "n_should_detect": 179,
+      "realtime_recall": 0.9608938547486033,
       "false_alarm_short_events": 0,
       "retrospective_relabelled_as_delay": 1.0
      },
      "missing": {
       "n_injected": 200,
-      "n_should_detect": 176,
-      "realtime_recall": 0.9715909090909091,
+      "n_should_detect": 172,
+      "realtime_recall": 0.9651162790697675,
       "false_alarm_short_events": 0,
       "retrospective_gap_recall": 1.0
      }
     },
-    "seconds": 41.53
+    "seconds": 111.5
    }
   },
   "reporting_gaps": {
@@ -328,59 +352,59 @@
    "split": "chronological: origins whose target window ends before split_t train; origins >= split_t test (same cells in both: an area forecast, not a cell-disjoint split); overlapping 60-min windows at a 15-min stride are correlated, so case counts overstate independent evidence",
    "run": {
     "defer_penalty": 1.0,
-    "n_units": 3860,
-    "n_train_origins": 80,
+    "n_units": 5447,
+    "n_train_origins": 272,
     "n_test_origins": 93,
     "n_train_rows": 300000,
-    "train_seconds": 3.44,
-    "split_t": 1767311999.5,
+    "train_seconds": 4.51,
+    "split_t": 1767484799.25,
     "test_window_edges_t": [
-     1767312000.0,
-     1767328740.0,
-     1767345480.0,
-     1767362220.0,
-     1767378960.0,
-     1767395700.0
+     1767484800.0,
+     1767501540.0,
+     1767518280.0,
+     1767535020.0,
+     1767551760.0,
+     1767568500.0
     ],
-    "n_dense_units": 413,
-    "seconds": 89.74,
+    "n_dense_units": 416,
+    "seconds": 167.43,
     "status": "completed",
     "corruption_logs": [
      {
-      "real_rows_affected_period": 1466009,
-      "omitted_rows": 76149,
-      "duplicated_rows": 439638,
-      "ghost_rows": 460824,
+      "real_rows_affected_period": 1450442,
+      "omitted_rows": 74472,
+      "duplicated_rows": 436546,
+      "ghost_rows": 446572,
       "ghost_kinds": {
-       "invalid_mmsi": 230293,
-       "transient": 161658,
-       "persistent": 68873
+       "invalid_mmsi": 223729,
+       "transient": 155987,
+       "persistent": 66856
       },
       "seed": 0,
       "severity": 1.0
      },
      {
-      "real_rows_affected_period": 1466009,
-      "omitted_rows": 76609,
-      "duplicated_rows": 440722,
-      "ghost_rows": 461527,
+      "real_rows_affected_period": 1450442,
+      "omitted_rows": 74471,
+      "duplicated_rows": 435006,
+      "ghost_rows": 447179,
       "ghost_kinds": {
-       "invalid_mmsi": 230605,
-       "transient": 161241,
-       "persistent": 69681
+       "invalid_mmsi": 223264,
+       "transient": 156595,
+       "persistent": 67320
       },
       "seed": 1,
       "severity": 1.0
      },
      {
-      "real_rows_affected_period": 1466009,
-      "omitted_rows": 76661,
-      "duplicated_rows": 439212,
-      "ghost_rows": 460932,
+      "real_rows_affected_period": 1450442,
+      "omitted_rows": 74710,
+      "duplicated_rows": 435481,
+      "ghost_rows": 447629,
       "ghost_kinds": {
-       "invalid_mmsi": 230572,
-       "transient": 161192,
-       "persistent": 69168
+       "invalid_mmsi": 223751,
+       "transient": 156864,
+       "persistent": 67014
       },
       "seed": 2,
       "severity": 1.0
@@ -400,14 +424,14 @@
      "lon",
      "log_area"
     ],
-    "model_path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\website\\cache\\models\\jan01_02\\traffic_density.pkl",
+    "model_path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\website\\cache\\models\\jan01_04\\traffic_density.pkl",
     "config": {
      "bucket_s": 900,
      "window_buckets": 4,
      "lookback_buckets": 12,
      "cell_deg": 0.25,
      "dense_min_mean": 5.0,
-     "train_time_frac": 0.5,
+     "train_time_frac": 0.75,
      "n_windows": 5,
      "seeds": [
       0,
@@ -447,60 +471,60 @@
    "zones": "study zones = 0.1 deg cells where >= 10 distinct vessels had a >=30-min dwell ending before split_t (top 60); NOT verified port/berth boundaries, no names",
    "not_measured": "berth capacity, queue length, waiting time, terminal throughput; the count is an underestimate when reports are missing",
    "run": {
-    "defer_penalty": 4.680464705283305,
+    "defer_penalty": 4.448538907746746,
     "n_units": 60,
-    "n_train_origins": 80,
+    "n_train_origins": 272,
     "n_test_origins": 93,
-    "n_train_rows": 4800,
-    "train_seconds": 0.89,
-    "split_t": 1767311999.5,
+    "n_train_rows": 16320,
+    "train_seconds": 1.25,
+    "split_t": 1767484799.25,
     "test_window_edges_t": [
-     1767312000.0,
-     1767328740.0,
-     1767345480.0,
-     1767362220.0,
-     1767378960.0,
-     1767395700.0
+     1767484800.0,
+     1767501540.0,
+     1767518280.0,
+     1767535020.0,
+     1767551760.0,
+     1767568500.0
     ],
     "n_dense_units": 60,
-    "seconds": 19.96,
+    "seconds": 35.96,
     "status": "completed",
     "corruption_logs": [
      {
-      "real_rows_affected_period": 473581,
-      "omitted_rows": 24794,
-      "duplicated_rows": 142195,
-      "ghost_rows": 148430,
+      "real_rows_affected_period": 499927,
+      "omitted_rows": 25806,
+      "duplicated_rows": 149667,
+      "ghost_rows": 155100,
       "ghost_kinds": {
-       "invalid_mmsi": 74390,
-       "transient": 51826,
-       "persistent": 22214
+       "invalid_mmsi": 77949,
+       "transient": 54093,
+       "persistent": 23058
       },
       "seed": 0,
       "severity": 1.0
      },
      {
-      "real_rows_affected_period": 473581,
-      "omitted_rows": 24677,
-      "duplicated_rows": 142100,
-      "ghost_rows": 148141,
+      "real_rows_affected_period": 499927,
+      "omitted_rows": 25904,
+      "duplicated_rows": 149956,
+      "ghost_rows": 155201,
       "ghost_kinds": {
-       "invalid_mmsi": 74042,
-       "transient": 51910,
-       "persistent": 22189
+       "invalid_mmsi": 77506,
+       "transient": 54389,
+       "persistent": 23306
       },
       "seed": 1,
       "severity": 1.0
      },
      {
-      "real_rows_affected_period": 473581,
-      "omitted_rows": 24593,
-      "duplicated_rows": 141955,
-      "ghost_rows": 148599,
+      "real_rows_affected_period": 499927,
+      "omitted_rows": 25894,
+      "duplicated_rows": 150082,
+      "ghost_rows": 155041,
       "ghost_kinds": {
-       "invalid_mmsi": 74056,
-       "transient": 52213,
-       "persistent": 22330
+       "invalid_mmsi": 77722,
+       "transient": 54273,
+       "persistent": 23046
       },
       "seed": 2,
       "severity": 1.0
@@ -520,14 +544,14 @@
      "lon",
      "log_area"
     ],
-    "model_path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\website\\cache\\models\\jan01_02\\port_occupancy.pkl",
+    "model_path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\website\\cache\\models\\jan01_04\\port_occupancy.pkl",
     "config": {
      "bucket_s": 900,
      "window_buckets": 4,
      "lookback_buckets": 12,
      "cell_deg": 0.25,
      "dense_min_mean": 5.0,
-     "train_time_frac": 0.5,
+     "train_time_frac": 0.75,
      "n_windows": 5,
      "seeds": [
       0,
@@ -569,47 +593,47 @@
    "split": "vessel-disjoint (same MMSI hash as the position task) and chronological (train decisions before split_t, test decisions after it with >= 45 min of history)",
    "not_claimed": "named ports, verified berth calls, cargo delivery, declared AIS destination",
    "run": {
-    "n_vessel_buckets": 3740283,
-    "n_dwell_events": 95546,
-    "n_arrival_dwells": 17193,
-    "n_zones": 991,
-    "split_t": 1767312000.0,
+    "n_vessel_buckets": 7463651,
+    "n_dwell_events": 182277,
+    "n_arrival_dwells": 34177,
+    "n_zones": 1601,
+    "split_t": 1767484800.0,
     "data_t": [
      1767225600,
-     1767398400
+     1767571200
     ],
     "status_counts": {
      "train": {
-      "no_arrival_in_window": 25639,
-      "arrival_zone": 18688,
-      "censored": 13265,
-      "arrival_unzoned": 5391
+      "no_arrival_in_window": 94679,
+      "arrival_zone": 73488,
+      "censored": 13914,
+      "arrival_unzoned": 9912
      },
      "test": {
-      "no_arrival_in_window": 9598,
-      "arrival_zone": 9045,
-      "censored": 5939,
-      "arrival_unzoned": 2862
+      "no_arrival_in_window": 9667,
+      "arrival_zone": 9312,
+      "censored": 5181,
+      "arrival_unzoned": 1529
      }
     },
-    "n_train_labeled": 18688,
-    "n_test_labeled": 9045,
-    "n_test_scored": 8971,
-    "n_train_classes": 750,
-    "n_test_classes": 540,
-    "n_train_candidate_rows": 340082,
-    "train_seconds": 4.59,
-    "n_test_vessels": 1124,
-    "n_train_vessels": 2493,
+    "n_train_labeled": 73488,
+    "n_test_labeled": 9312,
+    "n_test_scored": 9279,
+    "n_train_classes": 1415,
+    "n_test_classes": 620,
+    "n_train_candidate_rows": 1487914,
+    "train_seconds": 18.44,
+    "n_test_vessels": 1125,
+    "n_train_vessels": 4881,
     "test_window_edges_t": [
-     1767312000.0,
-     1767328920.0000002,
-     1767345840.0000005,
-     1767362760.0000005,
-     1767379680.0000007,
-     1767396600.000001
+     1767484800.0,
+     1767501720.0000002,
+     1767518640.0000005,
+     1767535560.0000005,
+     1767552480.0000007,
+     1767569400.000001
     ],
-    "seconds": 112.53,
+    "seconds": 321.03,
     "status": "completed",
     "features": [
      "dist_km",
@@ -637,7 +661,7 @@
      "zone_min_vessels": 3,
      "window_s": 21600,
      "anchor_spacing_s": 1800,
-     "train_time_frac": 0.5,
+     "train_time_frac": 0.75,
      "max_candidates": 25,
      "min_radius_km": 20.0,
      "max_radius_km": 150.0,
@@ -650,7 +674,200 @@
       2
      ]
     },
-    "model_path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\website\\cache\\models\\jan01_02\\destination.pkl"
+    "model_path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\website\\cache\\models\\jan01_04\\destination.pkl",
+    "eta": {
+     "status": "completed",
+     "n_train": 58536,
+     "n_conformal_calibration": 14952,
+     "n_train_vessels": 4881,
+     "conformal_widening_h": 0.005173688414321202,
+     "raw_interval_coverage_on_calibration": 0.7584938469769931,
+     "route_found_share": 0.9222185935118659,
+     "features": [
+      "route_km",
+      "gc_km",
+      "route_ratio",
+      "sog",
+      "lane_sog",
+      "bdiff",
+      "vessel_type",
+      "hour",
+      "log_zone_arrivals"
+     ],
+     "defer_penalty_h": 2.802112340927124,
+     "model_path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\website\\cache\\models\\jan01_04\\eta.pkl"
+    }
+   }
+  },
+  "sea_lanes": {
+   "definition": "per category group (cargo, tanker, passenger, tug/service; all other non-pleasure categories pooled as 'commercial') and 0.01 deg cell: distinct moving vessels, course histogram (8 sectors), speed quartiles and stop share from one fix per vessel-minute. Lane cell = moving traffic in the cell and >= 3 distinct moving vessels in its 0.03 deg block. Learned only from training-period reports of non-test vessels; pleasure craft excluded.",
+   "routing": "graph over pooled lane cells: 8-neighbour edges plus cell-to-cell transitions one vessel made within 15 min (<= 15 km); expected routes are shortest paths on that graph, never straight lines; positions > 10 km from a lane have no expected route",
+   "run": {
+    "status": "completed",
+    "n_vessel_minutes": 23938969,
+    "split_t": 1767484800.0,
+    "n_train_vessel_minutes": 12508910,
+    "n_train_vessels": 7469,
+    "lane_cells": {
+     "tug_service": 26060,
+     "passenger": 10613,
+     "tanker": 19591,
+     "cargo": 43792,
+     "commercial": 112898
+    },
+    "graph_nodes": 112898,
+    "graph_edges": 312221,
+    "config": {
+     "cell_deg": 0.01,
+     "coarse_deg": 0.1,
+     "moving_min_sog_kn": 2.0,
+     "stop_max_sog_kn": 0.5,
+     "lane_min_vessels": 3,
+     "block_deg": 0.03,
+     "min_cell_moving": 10,
+     "groups": [
+      "cargo",
+      "tanker",
+      "passenger",
+      "tug_service"
+     ],
+     "edge_max_km": 15.0,
+     "edge_max_gap_s": 900,
+     "own_lane_max_km": 20.0,
+     "snap_max_km": 10.0,
+     "route_limit_km": 800.0
+    },
+    "seconds": 41.43
+   }
+  },
+  "eta": {
+   "question": "When will this vessel arrive?",
+   "arrival_proxy": "start of the next >= 30-min dwell (< 1 kn) in an inferred arrival zone within 6 h (the destination label); not a verified berth call and not the start or end of unloading",
+   "model": "HistGradientBoostingRegressor (absolute error) + 10% / 90% quantile models on lane route distance to the ranker's top zone, straight-line distance, speed, lane speed, course vs bearing, vessel type, hour, zone activity; conditional on the predicted zone",
+   "baseline": "straight-line distance / reported speed to the same zone",
+   "run": {
+    "status": "completed",
+    "n_train": 58536,
+    "n_conformal_calibration": 14952,
+    "n_train_vessels": 4881,
+    "conformal_widening_h": 0.005173688414321202,
+    "raw_interval_coverage_on_calibration": 0.7584938469769931,
+    "route_found_share": 0.9222185935118659,
+    "features": [
+     "route_km",
+     "gc_km",
+     "route_ratio",
+     "sog",
+     "lane_sog",
+     "bdiff",
+     "vessel_type",
+     "hour",
+     "log_zone_arrivals"
+    ],
+    "defer_penalty_h": 2.802112340927124,
+    "model_path": "C:\\Users\\c9812\\Documents\\Software_development\\Hackathons\\caseathon2026\\website\\cache\\models\\jan01_04\\eta.pkl"
+   }
+  },
+  "anomaly": {
+   "question": "Which vessels move unusually relative to learned lanes?",
+   "unit": "vessel-window: fixes in the 60 min up to T, every 30 min; only fixes observed by T",
+   "score": "component percentiles (current off-lane distance, wrong-way share, speed deviation, unusual stops) vs calibration windows of the same category, tails summed and ranked again; calibration = the 48 h before the split, test-hash vessels the lanes never saw. >= 97.5 unusual, >= 99.5 high deviation: movement relative to history, NOT threat or intent",
+   "labels_available": "none for real anomalies; known-label check = synthetic 2-8 km lateral drifts injected into windows normal on the clean feed",
+   "run": {
+    "status": "completed",
+    "n_test_windows": 350322,
+    "n_test_vessels": 9202,
+    "n_calibration_windows": 219561,
+    "window_edges_t": [
+     1767488400.0,
+     1767504960.0000002,
+     1767521520.0000005,
+     1767538080.0000005,
+     1767554640.0000007,
+     1767571200.000001
+    ],
+    "calibration": {
+     "none|cargo": 26199,
+     "none|fishing": 26914,
+     "none|government": 3021,
+     "none|other": 12718,
+     "none|passenger": 20345,
+     "none|tanker": 12849,
+     "none|tug_service": 115504,
+     "none|unclassified": 2011,
+     "none|__pooled__": 219561,
+     "quality_aware|cargo": 26199,
+     "quality_aware|fishing": 26914,
+     "quality_aware|government": 3021,
+     "quality_aware|other": 12718,
+     "quality_aware|passenger": 20345,
+     "quality_aware|tanker": 12849,
+     "quality_aware|tug_service": 115504,
+     "quality_aware|unclassified": 2011,
+     "quality_aware|__pooled__": 219561
+    },
+    "seconds": 100.1,
+    "config": {
+     "calib_s": 172800,
+     "step_s": 1800,
+     "window_s": 3600,
+     "recent_s": 600,
+     "lane_far_km": 2.0,
+     "coverage_km": 20.0,
+     "wrongway_support": 0.1,
+     "unusual_stop_share": 0.05,
+     "weights": [
+      [
+       "off_lane",
+       1.0
+      ],
+      [
+       "wrong_way",
+       0.25
+      ],
+      [
+       "speed",
+       0.25
+      ],
+      [
+       "stop",
+       0.25
+      ]
+     ],
+     "unusual_pct": 97.5,
+     "high_pct": 99.5,
+     "min_calib_windows": 500,
+     "spike_speed_kn": 60.0,
+     "spike_min_km": 1.0,
+     "max_valid_sog_kn": 40.0,
+     "stale_hold_s": 1200,
+     "stale_flag_s": 600,
+     "gap_flag_s": 900,
+     "stale_schedule": [
+      0.1,
+      0.2,
+      0.3,
+      0.45,
+      0.6
+     ],
+     "stale_delay_min_s": 300,
+     "stale_delay_max_s": 2700,
+     "lowq_schedule": [
+      0.1,
+      0.2,
+      0.3,
+      0.45,
+      0.6
+     ],
+     "lowq_point_share": 0.5,
+     "synth_windows": 3000,
+     "synth_offset_km": [
+      2.0,
+      8.0
+     ],
+     "n_windows": 5,
+     "seed": 0
+    }
    }
   },
   "stress_tests": "same SIMULATED feed-degradation design as the position task: nominal / stale / low quality / combined x mitigation off/on, on identical test cases and unmodified targets, frozen models, seeds as configured. Counts: stale = latest 15-60 min of buckets not yet delivered; low quality = SYN-FASTFEED ghost IDs (invalid, transient, persistent), tripled messages, omissions. Destination: the position task's stale states and SYN-FASTFEED record defects."
@@ -670,5 +887,6 @@
   },
   "code_version": "0.1.0"
  },
- "ai_disclosure": "Code, documentation and experiment design were generated by Claude (Anthropic, model claude-opus-5-5) via Claude Code following info/CLAUDE_INSTRUCTIONS.md; the AI component under test is the sklearn model, not the LLM."
+ "ai_disclosure": "Code, documentation and experiment design were generated by Claude (Anthropic, model claude-opus-5-5) via Claude Code following info/CLAUDE_INSTRUCTIONS.md; the AI component under test is the sklearn model, not the LLM.",
+ "partial_update_utc": "2026-10-23T01:11:58+00:00"
 }

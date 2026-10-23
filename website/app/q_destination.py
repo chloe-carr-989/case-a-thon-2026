@@ -72,18 +72,18 @@ with map_col:
     fig = go.Figure()
     zs = Z[in_area(Z.lat, Z.lon, area)]
     fig.add_scattergeo(lat=zs.lat, lon=zs.lon, mode="markers", name="inferred arrival zones",
-                       marker=dict(size=4, color="#999", symbol="square"), text=zs.zone_id,
+                       marker=dict(size=4, color="#56606d", symbol="square"), text=zs.zone_id,
                        hovertemplate="%{text}<extra></extra>")
     for lab, m, col in [("top-1 correct", C.hit1, "#2e8b57"), ("top-1 wrong", C.ans & ~C.hit1, "#c62828")]:
         s = C[m]
         fig.add_scattergeo(lat=s.in_lat, lon=s.in_lon, mode="markers", name=f"vessel at decision: {lab}",
-                           marker=dict(size=7, color=col, line=dict(width=0.5, color="white")), customdata=s.case_id,
+                           marker=dict(size=7, color=col, line=dict(width=0.5, color="#0c0f12")), customdata=s.case_id,
                            text=[f"MMSI {a} · {hhmm(t)}" for a, t in zip(s.mmsi, s.decision_t)],
                            hovertemplate="%{text}<extra></extra>")
     R = C[~C.ans]
     if len(R):
         fig.add_scattergeo(lat=R.in_lat, lon=R.in_lon, mode="markers", name="unknown / sent to reviewer",
-                           marker=dict(size=9, color="rgba(0,0,0,0)", line=dict(width=1.5, color="#666")),
+                           marker=dict(size=9, color="rgba(0,0,0,0)", line=dict(width=1.5, color="#8a95a3")),
                            customdata=R.case_id, text=[f"MMSI {a}" for a in R.mmsi], hovertemplate="%{text}<extra></extra>")
     # selected case: input -> predictions, and the actual arrival
     preds = [S[f"{tag}_pred{k}"] for k in (1, 2, 3)] if S.ans else []
@@ -91,12 +91,12 @@ with map_col:
         if isinstance(z, str) and z in zpos.index:
             fig.add_scattergeo(lat=[S.in_lat, zpos.at[z, "lat"]], lon=[S.in_lon, zpos.at[z, "lon"]], mode="lines+markers",
                                name=f"selected: prediction #{k + 1}" if k == 0 else None, showlegend=k == 0,
-                               line=dict(width=3 if k == 0 else 1, color="#1565c0", dash="solid" if k == 0 else "dot"),
-                               marker=dict(size=[0, 12 - 3 * k], color="#1565c0"), hoverinfo="skip")
+                               line=dict(width=3 if k == 0 else 1, color="#49b6dc", dash="solid" if k == 0 else "dot"),
+                               marker=dict(size=[0, 12 - 3 * k], color="#49b6dc"), hoverinfo="skip")
     fig.add_scattergeo(lat=[S.arr_lat], lon=[S.arr_lon], mode="markers", name="selected: where it actually stopped",
-                       marker=dict(size=15, symbol="star", color="#222"), hoverinfo="skip")
+                       marker=dict(size=15, symbol="star", color="#d6dce4"), hoverinfo="skip")
     fig.add_scattergeo(lat=[S.in_lat], lon=[S.in_lon], mode="markers", name="selected: report the AI received",
-                       marker=dict(size=13, symbol="square", color="#1565c0", line=dict(width=1, color="white")),
+                       marker=dict(size=13, symbol="square", color="#49b6dc", line=dict(width=1, color="#0c0f12")),
                        hoverinfo="skip")
     zoom = st.toggle("Zoom to this vessel", key="dst_zoom")
     bounds = None

@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RES = ROOT / "results"
 LOG = RES / "review_log.csv"
 
+LAND, WATER = "#1a1f25", "#0b0f14"     # dark basemap shared with the Commercial / Government modes
 CONDITIONS = {"nominal": "Clean feed", "stale": "Stale reports", "low_quality": "Unreliable source",
               "combined": "Stale + unreliable"}
 # (lon_min, lat_min, lon_max, lat_max); display filters only, not port boundaries
@@ -27,6 +28,7 @@ AREAS = {
     "Chesapeake Bay": (-77.0, 36.7, -75.8, 39.4),
     "Puget Sound": (-123.2, 47.0, -122.2, 48.5),
     "San Francisco Bay": (-122.7, 37.4, -122.0, 38.2),
+    "Hampton Roads": (-76.7, 36.75, -75.85, 37.3),
     "Whole U.S.": None,
 }
 
@@ -93,9 +95,10 @@ def geo_layout(fig: go.Figure, area: str, height: int = 560, bounds=None):
         fig.update_geos(lataxis_range=[y0, y1], lonaxis_range=[x0, x1])
     else:
         fig.update_geos(fitbounds="locations")
-    fig.update_geos(projection_type="mercator", showland=True, landcolor="#efece6", showocean=True,
-                    oceancolor="#d7e6f2", showlakes=True, lakecolor="#d7e6f2", showrivers=True,
-                    showcountries=True, showsubunits=True, resolution=50)
+    fig.update_geos(projection_type="mercator", showland=True, landcolor=LAND, showocean=True, bgcolor=WATER,
+                    oceancolor=WATER, showlakes=True, lakecolor=WATER, showrivers=False, coastlinecolor="#333c47",
+                    showcountries=True, countrycolor="#333c47", showsubunits=True, subunitcolor="#262d36",
+                    resolution=50)
     fig.update_layout(height=height, margin=dict(l=0, r=0, t=0, b=0), clickmode="event+select",
                       legend=dict(orientation="h", y=-0.02, x=0, font=dict(size=11)))
 

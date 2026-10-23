@@ -156,17 +156,17 @@ with map_col:
     fig.add_scattergeo(lat=lat_l, lon=lon_l, mode="lines", line=dict(width=1, color="rgba(90,90,90,0.55)"),
                        hoverinfo="skip", showlegend=False)
     fig.add_scattergeo(lat=P.target_lat, lon=P.target_lon, mode="markers", name="actual position",
-                       marker=dict(size=4, color="#222"), hoverinfo="skip")
+                       marker=dict(size=4, color="#d6dce4"), hoverinfo="skip")
     for name, lo, hi, col in MISS_BANDS:
         s = P[(P.err >= lo) & (P.err < hi)]
         fig.add_scattergeo(lat=s.p_lat, lon=s.p_lon, mode="markers", name=f"prediction, miss {name}",
-                           marker=dict(size=8, color=col, line=dict(width=0.5, color="white")),
+                           marker=dict(size=8, color=col, line=dict(width=0.5, color="#0c0f12")),
                            customdata=s.case_id, text=[f"MMSI {m} · miss {km(e)}" for m, e in zip(s.mmsi, s.err)],
                            hovertemplate="%{text}<extra></extra>")
     R = C[~C.shown]
     if len(R):
         fig.add_scattergeo(lat=R.in_lat, lon=R.in_lon, mode="markers", name="sent to reviewer",
-                           marker=dict(size=9, color="rgba(0,0,0,0)", line=dict(width=1.5, color="#666")),
+                           marker=dict(size=9, color="rgba(0,0,0,0)", line=dict(width=1.5, color="#8a95a3")),
                            customdata=R.case_id, text=[f"MMSI {m} · sent to reviewer" for m in R.mmsi],
                            hovertemplate="%{text}<extra></extra>")
     # selected vessel
@@ -177,14 +177,14 @@ with map_col:
         trk = pd.DataFrame()
     if len(trk):
         fig.add_scattergeo(lat=trk.lat, lon=trk.lon, mode="lines", name="selected: real track, past hour",
-                           line=dict(width=3, color="#1565c0"), hoverinfo="skip")
+                           line=dict(width=3, color="#49b6dc"), hoverinfo="skip")
     fig.add_scattergeo(lat=[S.in_lat], lon=[S.in_lon], mode="markers", name="selected: report the AI received",
-                       marker=dict(size=13, symbol="square", color="#1565c0", line=dict(width=1, color="white")),
+                       marker=dict(size=13, symbol="square", color="#49b6dc", line=dict(width=1, color="#0c0f12")),
                        hoverinfo="skip")
     if S.shown:
         fig.add_scattergeo(lat=[S.p_lat, S.target_lat], lon=[S.p_lon, S.target_lon], mode="lines+markers",
-                           showlegend=False, line=dict(width=3, color="#1565c0"),
-                           marker=dict(size=[14, 9], color=["#1565c0", "#222"], symbol=["circle", "circle"]),
+                           showlegend=False, line=dict(width=3, color="#49b6dc"),
+                           marker=dict(size=[14, 9], color=["#49b6dc", "#d6dce4"], symbol=["circle", "circle"]),
                            hoverinfo="skip")
     if zoom:
         pts = pd.DataFrame({"lat": [S.in_lat, S.target_lat, S.p_lat] + list(trk.lat if len(trk) else []),
@@ -197,9 +197,10 @@ with map_col:
         fig.update_geos(lataxis_range=[y0, y1], lonaxis_range=[x0, x1])
     else:
         fig.update_geos(fitbounds="locations")
-    fig.update_geos(projection_type="mercator", showland=True, landcolor="#efece6", showocean=True,
-                    oceancolor="#d7e6f2", showlakes=True, lakecolor="#d7e6f2", showrivers=True,
-                    showcountries=True, showsubunits=True, resolution=50)
+    fig.update_geos(projection_type="mercator", showland=True, landcolor="#1a1f25", showocean=True, bgcolor="#0b0f14",
+                    oceancolor="#0b0f14", showlakes=True, lakecolor="#0b0f14", showrivers=False,
+                    coastlinecolor="#333c47", showcountries=True, countrycolor="#333c47", showsubunits=True,
+                    subunitcolor="#262d36", resolution=50)
     fig.update_layout(height=620, margin=dict(l=0, r=0, t=0, b=0), clickmode="event+select",
                       legend=dict(orientation="h", y=-0.02, x=0, font=dict(size=11)))
     ev = st.plotly_chart(fig, width="stretch", on_select="rerun", selection_mode="points", key="map")
@@ -274,7 +275,7 @@ with st.expander("How the error grows as the feed degrades (all areas, moving ve
     W = M[(M.condition == cond) & (M.subgroup == "underway_ge2kn") & (M.predictor == "hgb") & (M.window != "all")]
     W = W.assign(window=W.window.astype(int)).groupby(["window", "mitigation"]).mean(numeric_only=True).reset_index()
     fig2 = go.Figure()
-    for mit, name, col in [("none", "countermeasure off", "#c62828"), ("quality_aware", "countermeasure on", "#1565c0")]:
+    for mit, name, col in [("none", "countermeasure off", "#c62828"), ("quality_aware", "countermeasure on", "#49b6dc")]:
         s = W[W.mitigation == mit]
         fig2.add_scatter(x=s.window, y=s.p90_km, name=name, mode="lines+markers", line=dict(color=col, width=3),
                          text=[f"{c:.0%} answered" for c in s.coverage], hovertemplate="%{y:.1f} km · %{text}")
@@ -291,6 +292,8 @@ with st.expander("How the error grows as the feed degrades (all areas, moving ve
                "progression on real data).")
 
 with st.expander("Known limits of the countermeasure"):
+    st.caption("Figures below were measured on the earlier Jan 1-2 run (train Jan 1, test Jan 2); the default "
+               "results are now the Jan 1-4 run, so exact values differ. See results/example_cases.csv.")
     st.markdown("""
 - **Unseen defect not fixed:** a constant 1.5 km position shift (never seen while designing the checks) is not caught
   for moving vessels; their bad-case error gets slightly worse (2.5 → 2.9 km, 90th percentile).

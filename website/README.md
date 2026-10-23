@@ -1,4 +1,53 @@
-# AIS Feed-Degradation Lab (Case-a-thon 2026: Unintentional Data Poisoning)
+# AIS Maritime Intelligence (Case-a-thon 2026: Unintentional Data Poisoning)
+
+One map, two workflows, both built on a model of **normal traffic learned from historical AIS**:
+
+* **Commercial: when will this vessel arrive?** Select a cargo ship or tanker to see its learned lane, its expected
+  route (dashed, along observed traffic), the ETA with an 80% window, and the other vessels inbound to the same place.
+* **Government: which vessels move unusually?** Vessels are scored every 30 min against their own category's lanes.
+  Selecting one shows the score, the reasons in plain language, AIS data quality and freshness, the ERA5 wind as
+  context, and a human-review log (reviewed / false positive / note). Labels describe movement relative to history.
+  They are not evidence of identity, intent or threat.
+* **Shared model** (`src/aisdp/lanes.py`): per-category sea lanes (0.01° cells: traffic, course histogram, speed
+  quartiles, stop share) and a routing graph built from observed vessel transitions, learned only from training-period
+  reports of vessels that are never tested. Pleasure craft are excluded throughout.
+* **Data poisoning story:** every model runs on the same held-out cases under a clean feed and three SIMULATED
+  degradations (stale reports, an unreliable high-volume source, both), with and without a quality-aware countermeasure.
+  The compact **Model evaluation** section in each mode shows the effect; the original pages are under **Evaluation**.
+
+Measured on the website default `jan01_04` (train Jan 1-3, test the unseen Jan 4; `results/metrics.csv`):
+
+| | clean feed | unreliable source, naive | unreliable source + countermeasure |
+|---|---|---|---|
+| ETA mean error, model / straight-line baseline | 1 h 03 min / 1 h 22 min | 1 h 05 min | 1 h 05 min (98% answered) |
+| anomaly alerts caused by bad data, per 1,000 vessel-windows | 0 | 46 | 7 |
+| injected 2-8 km route drifts caught (known labels) | 48% | 52% | 49% |
+
+* ETA arrival proxy = start of the next >= 30-min stop in an inferred arrival zone (not a berth call, not unloading).
+  The 80% window is split-conformal calibrated: it holds 81% of the time when the predicted zone is right (about half
+  of cases) and 53% when it is wrong, so destination prediction is the limiting factor.
+* Anomaly thresholds: 97.5th / 99.5th percentile of the same category's calibration windows (the 48 h before the split,
+  vessels the lanes never saw), so about 2.5% of normal windows are "unusual" by construction. No verified anomaly
+  labels exist, so real-world detection accuracy is not claimed. Component weights were chosen on a vessel-disjoint
+  split of the calibration period: off-lane distance alone caught 62% of injected drifts there, an equal-weight sum of
+  all four components 21%, an Isolation Forest 19%. The injected test only contains off-lane drifts.
+* Weather is real ERA5 reanalysis wind (Open-Meteo archive, fetched once by `scripts/fetch_weather.py`). It is shown
+  as context and never changes a label.
+
+```powershell
+cd website
+.venv\Scripts\python scripts\run_pipeline.py --subsets jan01_04 --train-frac 0.75 --budget-s 6000   # ~16 min, all tasks
+.venv\Scripts\python scripts\run_pipeline.py --subsets jan01_04 --train-frac 0.75 --tasks sea_lanes,anomaly  # some tasks, merged into results/
+.venv\Scripts\python scripts\fetch_weather.py      # optional, needs network once
+.venv\Scripts\streamlit run app\dashboard.py --server.address localhost
+```
+
+The sections below describe the original feed-degradation lab. Their numbers come from the earlier `jan01_02` and
+single-day runs (kept in `results/runs/`).
+
+---
+
+## Original lab: AIS Feed-Degradation Lab
 
 **Question.** When stale reports and a high-volume, low-quality source enter a vessel-tracking feed, how
 much worse do 15-minute AI position estimates get, and does a quality-aware inference pipeline restore
@@ -20,7 +69,7 @@ useful performance without just refusing to answer?
 * **Shared checks:** record-level integrity flags and observation/reporting-gap detection
   (`src/aisdp/quality.py`), tested on real records and on synthetic withheld or delayed runs.
 * **Data:** MarineCadastre AIS broadcast points for 2026-01-01 and 2026-01-02 (`../data/dataset3/marine_2026-01/`; subsets in
-  `../data/dataset3/marine_subsets/`; not redistributed). The website default is the two-day run `jan01_02`.
+  `../data/dataset3/marine_subsets/`; not redistributed). The website default was the two-day run `jan01_02`; it is now `jan01_04` (see top).
   Everything for this project lives in `website/`; run all commands from that folder.
 
 ## Quick start (Windows PowerShell)
@@ -34,8 +83,8 @@ python -m venv .venv
 # 1) pipeline: all tasks on subsets 4 -> 3 -> 2 -> 1, then the full day (about 4 min measured, warm Parquet cache)
 .venv\Scripts\python scripts\run_pipeline.py --subsets subset4,subset3,subset2,subset1,full
 #    only some tasks:  --tasks quality,position_15m,traffic_density,destination,port_occupancy
-#    website default (train on Jan 1, test on Jan 2; ~5 min):
-.venv\Scripts\python scriptsun_pipeline.py --subsets jan01_02 --train-frac 0.5 --budget-s 3000
+#    earlier two-day default (train on Jan 1, test on Jan 2; ~5 min):
+.venv\Scripts\python scripts\run_pipeline.py --subsets jan01_02 --train-frac 0.5 --budget-s 3000
 
 # 2) dashboard (opens http://localhost:8501)
 .venv\Scripts\streamlit run app\dashboard.py
@@ -72,7 +121,7 @@ before the final determinism fix) took 159.9 s, including a 4.7 s ingest.
 Timings are from `results/benchmarks.csv` on a 12-thread machine with 19 GB RAM. All runs include a cold Parquet ingest
 (full day: 4.7 s of the 27.4 s).
 
-## Two-day results (website default: `jan01_02`, train on Jan 1, test on Jan 2)
+## Two-day results (earlier default `jan01_02`, train on Jan 1, test on Jan 2)
 
 Jan 1 and Jan 2 ingested together: 16,158,949 reports, 19,231 vessels, 313 s for all tasks (warm cache for Jan 1).
 `--train-frac 0.5` puts the chronological split at Jan 2 00:00 UTC for every task, so all models are trained on Jan 1
